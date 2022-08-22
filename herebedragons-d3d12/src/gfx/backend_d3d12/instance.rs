@@ -88,7 +88,9 @@ impl crate::gfx::Instance<Backend> for Instance {
                     has_hw_acceleration,
                 };
                 Ok(AdapterDetails {
-                    adapter: Adapter::new(unsafe { DxgiAdapter::from_adapter1(adapter) }),
+                    adapter: Adapter::new(self.lib_d3d12.clone(), unsafe {
+                        DxgiAdapter::from_adapter1(adapter)
+                    }),
                     description,
                 })
             })

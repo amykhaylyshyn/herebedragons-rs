@@ -2,7 +2,7 @@ mod error;
 pub mod gfx;
 mod hresult;
 
-use gfx::Instance;
+use gfx::{Adapter, Instance};
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -14,11 +14,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let window = WindowBuilder::new().build(&event_loop).unwrap();
     let instance = gfx::backend_d3d12::Instance::new()?;
     let adapters = instance.enumerate_adapters()?;
+    let selected_adapter = adapters
+        .into_iter()
+        .next()
+        .expect("no graphics adapter")
+        .adapter;
+    let device = selected_adapter.create_device()?;
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
 
         let _ = &instance;
+        let _ = &device;
 
         match event {
             Event::WindowEvent {
