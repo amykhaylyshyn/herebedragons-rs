@@ -63,10 +63,12 @@ impl Drop for Instance {
 
 impl crate::gfx::Instance<Backend> for Instance {
     fn enumerate_adapters(&self) {
-        let factory6 = self
-            .factory
-            .as_factory6()
-            .expect("factory6 is not available");
+        let factory6 = unsafe {
+            self.factory
+                .cast::<dxgi1_6::IDXGIFactory6>()
+                .into_result()
+                .expect("factory6 is not available")
+        };
         let adapters = (0..)
             .map(|adapter_index| -> Result<_, Error> {
                 let mut adapter = d3d12::WeakPtr::<dxgi::IDXGIAdapter1>::null();
