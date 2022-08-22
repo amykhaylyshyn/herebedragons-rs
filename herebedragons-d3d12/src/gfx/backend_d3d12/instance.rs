@@ -1,21 +1,22 @@
 use std::sync::Arc;
 
-use d3d12::{DxgiFactory, FactoryCreationFlags};
+use d3d12::{DxgiAdapter, DxgiFactory};
 use winapi::{
     shared::{
         dxgi::{self, DXGI_ADAPTER_DESC1, DXGI_ADAPTER_FLAG_SOFTWARE},
-        dxgi1_6,
+        dxgi1_6, winerror,
     },
     Interface,
 };
-use windows::core::HRESULT;
+use windows::core::{HRESULT, HSTRING};
 
 use crate::{
-    error::{Error, RenderDeviceError},
+    error::{Error, RenderDeviceError, Result},
+    gfx::{AdapterDescription, AdapterDetails},
     hresult::IntoResult,
 };
 
-use super::Backend;
+use super::{Adapter, Backend};
 
 pub struct Instance {
     lib_d3d12: Arc<d3d12::D3D12Lib>,
@@ -24,7 +25,7 @@ pub struct Instance {
 }
 
 impl Instance {
-    pub fn new() -> Result<Self, Error> {
+    pub fn new() -> Result<Self> {
         let lib_d3d12 = d3d12::D3D12Lib::new().map_err(|err| {
             log::error!("load d3d12 library error: {}", err);
             RenderDeviceError::LoadLibraryError
@@ -62,15 +63,10 @@ impl Drop for Instance {
 }
 
 impl crate::gfx::Instance<Backend> for Instance {
-    fn enumerate_adapters(&self) {
-        let factory6 = unsafe {
-            self.factory
-                .cast::<dxgi1_6::IDXGIFactory6>()
-                .into_result()
-                .expect("factory6 is not available")
-        };
-        let adapters = (0..)
-            .map(|adapter_index| -> Result<_, Error> {
+    fn enumerate_adapters(&self) -> Result<Vec<AdapterDetails<Backend>>> {
+        let factory6 = unsafe { self.factory.cast::<dxgi1_6::IDXGIFactory6>().into_result() }?;
+        (0..)
+            .map(|adapter_index| -> Result<_> {
                 let mut adapter = d3d12::WeakPtr::<dxgi::IDXGIAdapter1>::null();
                 unsafe {
                     HRESULT(factory6.EnumAdapterByGpuPreference(
@@ -84,16 +80,22 @@ impl crate::gfx::Instance<Backend> for Instance {
 
                 let mut desc = DXGI_ADAPTER_DESC1::default();
                 unsafe { HRESULT(adapter.GetDesc1(&mut desc)) }.ok()?;
-                if desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE != 0 {
-                    Ok(None)
-                } else {
-                    Ok(Some(adapter))
-                }
+                let has_hw_acceleration = desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE == 0;
+                let description = AdapterDescription {
+                    device_id: desc.DeviceId,
+                    vendor_id: desc.VendorId,
+                    description: HSTRING::from_wide(&desc.Description).to_string(),
+                    has_hw_acceleration,
+                };
+                Ok(AdapterDetails {
+                    adapter: Adapter::new(unsafe { DxgiAdapter::from_adapter1(adapter) }),
+                    description,
+                })
             })
-            .find_map(|result| match result {
-                Ok(Some(adapter)) => Some(Ok(adapter)),
-                Err(err) => Some(Err(err)),
-                _ => None,
-            });
+            .take_while(|result| match &result {
+                Err(Error::WindowsError(err)) => err.code().0 != winerror::DXGI_ERROR_NOT_FOUND,
+                _ => true,
+            })
+            .collect()
     }
 }
