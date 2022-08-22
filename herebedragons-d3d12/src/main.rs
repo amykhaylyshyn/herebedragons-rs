@@ -2,6 +2,7 @@ mod error;
 pub mod gfx;
 mod hresult;
 
+use dotenv::dotenv;
 use gfx::{Adapter, Instance};
 use winit::{
     event::{Event, WindowEvent},
@@ -10,16 +11,17 @@ use winit::{
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    dotenv().ok();
+    env_logger::init();
+
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
     let instance = gfx::backend_d3d12::Instance::new()?;
     let adapters = instance.enumerate_adapters()?;
-    let selected_adapter = adapters
-        .into_iter()
-        .next()
-        .expect("no graphics adapter")
-        .adapter;
-    let device = selected_adapter.create_device()?;
+    let selected_adapter = adapters.into_iter().next().expect("no graphics adapter");
+    let device = selected_adapter.adapter.create_device()?;
+
+    log::info!("selected GPU: {:?}", selected_adapter.description);
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;

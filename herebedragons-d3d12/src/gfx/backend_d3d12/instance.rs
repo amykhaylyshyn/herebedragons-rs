@@ -81,10 +81,12 @@ impl crate::gfx::Instance<Backend> for Instance {
                 let mut desc = DXGI_ADAPTER_DESC1::default();
                 unsafe { HRESULT(adapter.GetDesc1(&mut desc)) }.ok()?;
                 let has_hw_acceleration = desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE == 0;
+                let description = &desc.Description;
+                let description_len = description.iter().take_while(|ch| **ch != 0).count();
                 let description = AdapterDescription {
                     device_id: desc.DeviceId,
                     vendor_id: desc.VendorId,
-                    description: HSTRING::from_wide(&desc.Description).to_string(),
+                    description: HSTRING::from_wide(&description[0..description_len]).to_string(),
                     has_hw_acceleration,
                 };
                 Ok(AdapterDetails {

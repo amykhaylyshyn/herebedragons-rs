@@ -2,6 +2,7 @@ pub mod backend_d3d12;
 
 use crate::error::Result;
 
+#[derive(Debug, Clone)]
 pub struct AdapterDescription {
     pub device_id: u32,
     pub vendor_id: u32,
