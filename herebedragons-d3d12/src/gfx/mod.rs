@@ -16,7 +16,7 @@ pub struct AdapterDetails<B: Backend> {
 }
 
 pub trait Backend: Sized {
-    type Factory: Factory<Self>;
+    type Instance: Instance<Self>;
     type Adapter: Adapter<Self>;
     type Device: Device<Self>;
     type Queue: Queue<Self>;
@@ -26,7 +26,7 @@ pub trait Backend: Sized {
     type Fence: Fence<Self>;
 }
 
-pub trait Factory<B: Backend> {
+pub trait Instance<B: Backend> {
     fn enumerate_adapters(&self) -> Result<Vec<AdapterDetails<B>>>;
 }
 

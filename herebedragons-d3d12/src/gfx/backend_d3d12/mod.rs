@@ -1,14 +1,14 @@
 mod adapter;
 mod device;
-mod factory;
 mod fence;
+mod instance;
 mod memory;
 mod queue;
 
 pub use adapter::*;
 pub use device::*;
-pub use factory::*;
 pub use fence::*;
+pub use instance::*;
 pub use memory::*;
 pub use queue::*;
 
@@ -16,7 +16,7 @@ pub use queue::*;
 pub struct Backend;
 
 impl crate::gfx::Backend for Backend {
-    type Factory = Factory;
+    type Instance = Instance;
     type Adapter = Adapter;
     type Device = Device;
     type Queue = Queue;

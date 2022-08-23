@@ -1,4 +1,4 @@
-use crate::gfx::{Adapter, Backend, Device, Factory};
+use crate::gfx::{Adapter, Backend, Device, Instance};
 
 use crate::error::Result;
 
@@ -8,7 +8,7 @@ struct BackbufferResources<B: Backend> {
 }
 
 pub struct Renderer<B: Backend> {
-    instance: B::Factory,
+    instance: B::Instance,
     adapter: B::Adapter,
     device: B::Device,
     queue: B::Queue,
@@ -16,7 +16,7 @@ pub struct Renderer<B: Backend> {
 }
 
 impl<B: Backend> Renderer<B> {
-    pub fn new(instance: B::Factory, backbuffer_count: usize) -> Result<Self> {
+    pub fn new(instance: B::Instance, backbuffer_count: usize) -> Result<Self> {
         let adapters = instance.enumerate_adapters()?;
         let selected_adapter = adapters.into_iter().next().expect("no graphics adapter");
         let device = selected_adapter.adapter.create_device()?;
