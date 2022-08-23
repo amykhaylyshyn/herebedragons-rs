@@ -16,12 +16,17 @@ pub struct AdapterDetails<B: Backend> {
 }
 
 pub trait Backend: Sized {
-    type Instance: Instance<Self>;
+    type Factory: Factory<Self>;
     type Adapter: Adapter<Self>;
     type Device: Device<Self>;
+    type Queue: Queue<Self>;
+    type DescriptorHeap: DescriptorHeap<Self>;
+    type CommandAllocator: CommandAllocator<Self>;
+    type CommandList: CommandList<Self>;
+    type Fence: Fence<Self>;
 }
 
-pub trait Instance<B: Backend> {
+pub trait Factory<B: Backend> {
     fn enumerate_adapters(&self) -> Result<Vec<AdapterDetails<B>>>;
 }
 
@@ -29,4 +34,18 @@ pub trait Adapter<B: Backend> {
     fn create_device(&self) -> Result<B::Device>;
 }
 
-pub trait Device<B: Backend> {}
+pub trait Device<B: Backend> {
+    fn create_queue(&self) -> Result<B::Queue>;
+    fn create_command_allocator(&self) -> Result<B::CommandAllocator>;
+    fn create_fence(&self, initial: u64) -> Result<B::Fence>;
+}
+
+pub trait Queue<B: Backend> {}
+
+pub trait DescriptorHeap<B: Backend> {}
+
+pub trait CommandAllocator<B: Backend> {}
+
+pub trait CommandList<B: Backend> {}
+
+pub trait Fence<B: Backend> {}

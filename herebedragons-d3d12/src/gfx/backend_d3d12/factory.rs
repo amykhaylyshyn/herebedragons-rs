@@ -18,13 +18,13 @@ use crate::{
 
 use super::{Adapter, Backend};
 
-pub struct Instance {
+pub struct Factory {
     lib_d3d12: Arc<d3d12::D3D12Lib>,
     lib_dxgi: d3d12::DxgiLib,
     factory: d3d12::DxgiFactory,
 }
 
-impl Instance {
+impl Factory {
     pub fn new() -> Result<Self> {
         let lib_d3d12 = d3d12::D3D12Lib::new().map_err(|err| {
             log::error!("load d3d12 library error: {}", err);
@@ -54,7 +54,7 @@ impl Instance {
     }
 }
 
-impl Drop for Instance {
+impl Drop for Factory {
     fn drop(&mut self) {
         unsafe {
             self.factory.destroy();
@@ -62,7 +62,7 @@ impl Drop for Instance {
     }
 }
 
-impl crate::gfx::Instance<Backend> for Instance {
+impl crate::gfx::Factory<Backend> for Factory {
     fn enumerate_adapters(&self) -> Result<Vec<AdapterDetails<Backend>>> {
         let factory6 = unsafe { self.factory.cast::<dxgi1_6::IDXGIFactory6>().into_result() }?;
         (0..)
