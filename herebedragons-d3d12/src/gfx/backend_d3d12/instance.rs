@@ -20,7 +20,7 @@ use super::{Adapter, BackendD3D12, Device};
 
 pub struct Instance {
     lib_d3d12: Arc<d3d12::D3D12Lib>,
-    lib_dxgi: d3d12::DxgiLib,
+    _lib_dxgi: d3d12::DxgiLib,
     factory: d3d12::DxgiFactory,
 }
 
@@ -48,7 +48,7 @@ impl Instance {
 
         Ok(Self {
             lib_d3d12: Arc::new(lib_d3d12),
-            lib_dxgi,
+            _lib_dxgi: lib_dxgi,
             factory,
         })
     }
@@ -90,9 +90,7 @@ impl crate::gfx::Instance<BackendD3D12> for Instance {
                     has_hw_acceleration,
                 };
                 Ok(AdapterDetails {
-                    adapter: Adapter::new(self.lib_d3d12.clone(), unsafe {
-                        DxgiAdapter::from_adapter1(adapter)
-                    }),
+                    adapter: Adapter::new(unsafe { DxgiAdapter::from_adapter1(adapter) }),
                     description,
                 })
             })
