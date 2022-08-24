@@ -12,11 +12,11 @@ use windows::core::{HRESULT, HSTRING};
 
 use crate::{
     error::{Error, RenderDeviceError, Result},
-    gfx::{AdapterDescription, AdapterDetails},
+    gfx::{AdapterDescription, AdapterDetails, ScopedResource},
     hresult::IntoResult,
 };
 
-use super::{Adapter, BackendD3D12};
+use super::{Adapter, BackendD3D12, Device};
 
 pub struct Instance {
     lib_d3d12: Arc<d3d12::D3D12Lib>,
@@ -101,5 +101,18 @@ impl crate::gfx::Instance<BackendD3D12> for Instance {
                 _ => true,
             })
             .collect()
+    }
+
+    fn create_device(&self, adapter: &Adapter) -> Result<ScopedResource<Instance, Device>> {
+        let adapter = unsafe { adapter.raw().cast::<dxgi::IDXGIAdapter1>().into_result()? };
+        let device = self
+            .lib_d3d12
+            .create_device(adapter, d3d12::FeatureLevel::L11_0)
+            .map_err(|err| {
+                log::error!("Create D3D12 error {}", err);
+                RenderDeviceError::LoadLibraryError
+            })?
+            .into_result()?;
+        Ok(ScopedResource::new(self, Device::new(device)))
     }
 }

@@ -1,7 +1,7 @@
 use d3d12::{CmdListType, CommandQueueFlags};
 
-use crate::error::Result;
 use crate::hresult::IntoResult;
+use crate::{error::Result, gfx::ScopedResource};
 
 use super::{BackendD3D12, CommandAllocator, Fence, Queue};
 
@@ -22,7 +22,7 @@ impl Drop for Device {
 }
 
 impl crate::gfx::Device<BackendD3D12> for Device {
-    fn create_queue(&self) -> Result<Queue> {
+    fn create_queue(&self) -> Result<ScopedResource<Device, Queue>> {
         let queue = self
             .device
             .create_command_queue(
@@ -32,19 +32,19 @@ impl crate::gfx::Device<BackendD3D12> for Device {
                 Default::default(),
             )
             .into_result()?;
-        Ok(Queue::new(queue))
+        Ok(ScopedResource::new(self, Queue::new(queue)))
     }
 
-    fn create_command_allocator(&self) -> Result<CommandAllocator> {
+    fn create_command_allocator(&self) -> Result<ScopedResource<Device, CommandAllocator>> {
         let allocator = self
             .device
             .create_command_allocator(CmdListType::Direct)
             .into_result()?;
-        Ok(CommandAllocator::new(allocator))
+        Ok(ScopedResource::new(self, CommandAllocator::new(allocator)))
     }
 
-    fn create_fence(&self, initial: u64) -> Result<Fence> {
+    fn create_fence(&self, initial: u64) -> Result<ScopedResource<Device, Fence>> {
         let fence = self.device.create_fence(initial).into_result()?;
-        Ok(Fence::new(fence))
+        Ok(ScopedResource::new(self, Fence::new(fence)))
     }
 }
