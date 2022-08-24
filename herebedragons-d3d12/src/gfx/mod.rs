@@ -14,7 +14,8 @@ pub trait Backend: Sized {
     type Fence: Fence<Self>;
 }
 
-pub trait Instance<B: Backend> {
+pub trait Instance<B: Backend>: Sized {
+    fn new() -> Result<Self>;
     fn enumerate_adapters(&self) -> Result<Vec<AdapterDetails<B>>>;
     fn create_device(&self, adapter: &B::Adapter)
         -> Result<ScopedResource<B::Instance, B::Device>>;

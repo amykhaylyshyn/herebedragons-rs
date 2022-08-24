@@ -7,7 +7,8 @@ struct BackbufferResources<'a, B: Backend> {
     fence: ScopedResource<'a, B::Device, B::Fence>,
 }
 
-pub fn render_loop<B: Backend>(instance: B::Instance, backbuffer_count: usize) -> Result<()> {
+pub fn render_loop<B: Backend>(backbuffer_count: usize) -> Result<()> {
+    let instance = B::Instance::new()?;
     let adapters = instance.enumerate_adapters()?;
     let default_adapter = adapters.into_iter().next().expect("no graphics adapter");
     let device = instance.create_device(&default_adapter.adapter)?;

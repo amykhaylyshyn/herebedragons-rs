@@ -63,6 +63,10 @@ impl Drop for Instance {
 }
 
 impl crate::gfx::Instance<BackendD3D12> for Instance {
+    fn new() -> Result<Self> {
+        Self::new()
+    }
+
     fn enumerate_adapters(&self) -> Result<Vec<AdapterDetails<BackendD3D12>>> {
         let factory6 = unsafe { self.factory.cast::<dxgi1_6::IDXGIFactory6>().into_result() }?;
         (0..)

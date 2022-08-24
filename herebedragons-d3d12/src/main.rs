@@ -19,8 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
-    let instance = crate::gfx::backend_d3d12::Instance::new()?;
-    render_loop::<BackendD3D12>(instance, 3)?;
+    render_loop::<BackendD3D12>(3)?;
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
