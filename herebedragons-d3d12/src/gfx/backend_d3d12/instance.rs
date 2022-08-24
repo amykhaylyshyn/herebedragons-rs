@@ -16,7 +16,7 @@ use crate::{
     hresult::IntoResult,
 };
 
-use super::{Adapter, Backend};
+use super::{Adapter, BackendD3D12};
 
 pub struct Instance {
     lib_d3d12: Arc<d3d12::D3D12Lib>,
@@ -62,8 +62,8 @@ impl Drop for Instance {
     }
 }
 
-impl crate::gfx::Instance<Backend> for Instance {
-    fn enumerate_adapters(&self) -> Result<Vec<AdapterDetails<Backend>>> {
+impl crate::gfx::Instance<BackendD3D12> for Instance {
+    fn enumerate_adapters(&self) -> Result<Vec<AdapterDetails<BackendD3D12>>> {
         let factory6 = unsafe { self.factory.cast::<dxgi1_6::IDXGIFactory6>().into_result() }?;
         (0..)
             .map(|adapter_index| -> Result<_> {

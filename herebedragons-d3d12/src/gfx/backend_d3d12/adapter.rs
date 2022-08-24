@@ -5,7 +5,7 @@ use winapi::shared::dxgi;
 
 use crate::{error::RenderDeviceError, hresult::IntoResult};
 
-use super::{Backend, Device};
+use super::{BackendD3D12, Device};
 
 pub struct Adapter {
     lib_d3d12: Arc<d3d12::D3D12Lib>,
@@ -18,7 +18,7 @@ impl Adapter {
     }
 }
 
-impl crate::gfx::Adapter<Backend> for Adapter {
+impl crate::gfx::Adapter<BackendD3D12> for Adapter {
     fn create_device(&self) -> crate::error::Result<Device> {
         let adapter = unsafe { self.adapter.cast::<dxgi::IDXGIAdapter1>().into_result()? };
         let device = self

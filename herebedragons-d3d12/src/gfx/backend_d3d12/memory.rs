@@ -1,5 +1,5 @@
-use super::Backend;
+use super::BackendD3D12;
 
 pub struct DescriptorHeap {}
 
-impl crate::gfx::DescriptorHeap<Backend> for DescriptorHeap {}
+impl crate::gfx::DescriptorHeap<BackendD3D12> for DescriptorHeap {}

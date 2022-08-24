@@ -3,7 +3,7 @@ use d3d12::{CmdListType, CommandQueueFlags};
 use crate::error::Result;
 use crate::hresult::IntoResult;
 
-use super::{Backend, CommandAllocator, Fence, Queue};
+use super::{BackendD3D12, CommandAllocator, Fence, Queue};
 
 pub struct Device {
     device: d3d12::Device,
@@ -21,7 +21,7 @@ impl Drop for Device {
     }
 }
 
-impl crate::gfx::Device<Backend> for Device {
+impl crate::gfx::Device<BackendD3D12> for Device {
     fn create_queue(&self) -> Result<Queue> {
         let queue = self
             .device

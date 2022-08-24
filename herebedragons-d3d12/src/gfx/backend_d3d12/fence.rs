@@ -1,4 +1,4 @@
-use super::Backend;
+use super::BackendD3D12;
 
 pub struct Fence {
     fence: d3d12::Fence,
@@ -16,4 +16,4 @@ impl Drop for Fence {
     }
 }
 
-impl crate::gfx::Fence<Backend> for Fence {}
+impl crate::gfx::Fence<BackendD3D12> for Fence {}

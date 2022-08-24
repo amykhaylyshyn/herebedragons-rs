@@ -13,9 +13,9 @@ pub use memory::*;
 pub use queue::*;
 
 #[derive(Clone)]
-pub struct Backend;
+pub struct BackendD3D12;
 
-impl crate::gfx::Backend for Backend {
+impl crate::gfx::Backend for BackendD3D12 {
     type Instance = Instance;
     type Adapter = Adapter;
     type Device = Device;

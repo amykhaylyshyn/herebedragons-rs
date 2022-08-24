@@ -8,11 +8,11 @@ struct BackbufferResources<B: Backend> {
 }
 
 pub struct Renderer<B: Backend> {
-    instance: B::Instance,
-    adapter: B::Adapter,
-    device: B::Device,
-    queue: B::Queue,
     backbuffers: Vec<BackbufferResources<B>>,
+    queue: B::Queue,
+    device: B::Device,
+    adapter: B::Adapter,
+    instance: B::Instance,
 }
 
 impl<B: Backend> Renderer<B> {

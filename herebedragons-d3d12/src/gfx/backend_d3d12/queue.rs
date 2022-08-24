@@ -1,6 +1,6 @@
 use d3d12::CommandQueue;
 
-use super::Backend;
+use super::BackendD3D12;
 
 pub struct Queue {
     queue: CommandQueue,
@@ -18,7 +18,7 @@ impl Drop for Queue {
     }
 }
 
-impl crate::gfx::Queue<Backend> for Queue {}
+impl crate::gfx::Queue<BackendD3D12> for Queue {}
 
 pub struct CommandAllocator {
     allocator: d3d12::CommandAllocator,
@@ -36,7 +36,7 @@ impl Drop for CommandAllocator {
     }
 }
 
-impl crate::gfx::CommandAllocator<Backend> for CommandAllocator {}
+impl crate::gfx::CommandAllocator<BackendD3D12> for CommandAllocator {}
 
 pub struct CommandList {
     cmd_list: d3d12::CommandList,
@@ -54,4 +54,4 @@ impl Drop for CommandList {
     }
 }
 
-impl crate::gfx::CommandList<Backend> for CommandList {}
+impl crate::gfx::CommandList<BackendD3D12> for CommandList {}

@@ -4,7 +4,8 @@ mod hresult;
 mod renderer;
 
 use dotenv::dotenv;
-use gfx::{Adapter, Instance};
+use gfx::backend_d3d12::BackendD3D12;
+use renderer::Renderer;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -18,17 +19,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
     let instance = gfx::backend_d3d12::Instance::new()?;
-    let adapters = instance.enumerate_adapters()?;
-    let selected_adapter = adapters.into_iter().next().expect("no graphics adapter");
-    let device = selected_adapter.adapter.create_device()?;
-
-    log::info!("selected GPU: {:?}", selected_adapter.description);
+    let renderer: Renderer<BackendD3D12> = Renderer::new(instance, 3)?;
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
 
-        let _ = &instance;
-        let _ = &device;
+        let _ = &renderer;
 
         match event {
             Event::WindowEvent {
