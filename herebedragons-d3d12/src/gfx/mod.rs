@@ -3,6 +3,11 @@ pub mod backend_d3d12;
 use crate::error::Result;
 use derive_more::Deref;
 
+#[derive(Debug, Default)]
+pub struct NewInstanceOptions {
+    pub enable_debug_layer: bool,
+}
+
 pub trait Backend: Sized {
     type Instance: Instance<Self>;
     type Adapter: Adapter<Self>;
@@ -15,7 +20,7 @@ pub trait Backend: Sized {
 }
 
 pub trait Instance<B: Backend>: Sized {
-    fn new() -> Result<Self>;
+    fn new(options: NewInstanceOptions) -> Result<Self>;
     fn enumerate_adapters(&self) -> Result<Vec<AdapterDetails<B>>>;
     fn create_device(&self, adapter: &B::Adapter)
         -> Result<ScopedResource<B::Instance, B::Device>>;

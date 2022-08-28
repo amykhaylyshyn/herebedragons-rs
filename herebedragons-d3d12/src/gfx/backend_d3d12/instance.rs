@@ -13,7 +13,7 @@ use windows::core::{HRESULT, HSTRING};
 
 use crate::{
     error::{Error, Result},
-    gfx::{AdapterDescription, AdapterDetails, ScopedResource},
+    gfx::{AdapterDescription, AdapterDetails, NewInstanceOptions, ScopedResource},
     hresult::IntoResult,
 };
 
@@ -26,7 +26,7 @@ pub struct Instance {
 }
 
 impl Instance {
-    pub fn new() -> Result<Self> {
+    pub fn new(options: NewInstanceOptions) -> Result<Self> {
         let lib_d3d12 = d3d12::D3D12Lib::new().map_err(|err| {
             log::error!("load d3d12 library error: {}", err);
             Error::LoadLibraryError
@@ -36,7 +36,7 @@ impl Instance {
             Error::LoadLibraryError
         })?;
 
-        let dbg_factory = if cfg!(debug_assertions) {
+        let dbg_factory = if options.enable_debug_layer {
             let dbg_interface = lib_d3d12
                 .get_debug_interface()
                 .map_err(|err| {
@@ -127,8 +127,8 @@ impl Drop for Instance {
 }
 
 impl crate::gfx::Instance<BackendD3D12> for Instance {
-    fn new() -> Result<Self> {
-        Self::new()
+    fn new(options: NewInstanceOptions) -> Result<Self> {
+        Self::new(options)
     }
 
     fn enumerate_adapters(&self) -> Result<Vec<AdapterDetails<BackendD3D12>>> {

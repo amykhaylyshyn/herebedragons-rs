@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use d3d12::DxgiAdapter;
 
 use super::BackendD3D12;

@@ -2,7 +2,7 @@ use winit::event::{Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::WindowBuilder;
 
-use crate::gfx::{Backend, Device, Instance, ScopedResource};
+use crate::gfx::{Backend, Device, Instance, NewInstanceOptions, ScopedResource};
 
 use crate::error::Result;
 
@@ -15,7 +15,9 @@ pub fn render_main<B>(backbuffer_count: usize) -> Result<()>
 where
     B: Backend,
 {
-    let instance = B::Instance::new()?;
+    let instance = B::Instance::new(NewInstanceOptions {
+        enable_debug_layer: true,
+    })?;
     let adapters = instance.enumerate_adapters()?;
     let default_adapter = adapters.into_iter().next().expect("no graphics adapter");
     let device = instance.create_device(&default_adapter.adapter)?;
