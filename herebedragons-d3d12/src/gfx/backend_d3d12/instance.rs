@@ -1,17 +1,18 @@
 use std::sync::Arc;
 
-use d3d12::{DxgiAdapter, DxgiFactory};
+use d3d12::{DxgiAdapter, DxgiFactory, FactoryCreationFlags};
 use winapi::{
     shared::{
         dxgi::{self, DXGI_ADAPTER_DESC1, DXGI_ADAPTER_FLAG_SOFTWARE},
         dxgi1_6, winerror,
     },
+    um::dxgidebug,
     Interface,
 };
 use windows::core::{HRESULT, HSTRING};
 
 use crate::{
-    error::{Error, RenderDeviceError, Result},
+    error::{Error, Result},
     gfx::{AdapterDescription, AdapterDetails, ScopedResource},
     hresult::IntoResult,
 };
@@ -28,22 +29,85 @@ impl Instance {
     pub fn new() -> Result<Self> {
         let lib_d3d12 = d3d12::D3D12Lib::new().map_err(|err| {
             log::error!("load d3d12 library error: {}", err);
-            RenderDeviceError::LoadLibraryError
+            Error::LoadLibraryError
         })?;
         let lib_dxgi = d3d12::DxgiLib::new().map_err(|err| {
             log::error!("load dxgi library error: {}", err);
-            RenderDeviceError::LoadLibraryError
+            Error::LoadLibraryError
         })?;
-        let factory = unsafe {
-            DxgiFactory::from_factory1(
-                lib_dxgi
-                    .create_factory1()
-                    .map_err(|err| {
-                        log::error!("load dxgi library error: {}", err);
-                        RenderDeviceError::LoadLibraryError
-                    })?
-                    .into_result()?,
-            )
+
+        let dbg_factory = if cfg!(debug_assertions) {
+            let dbg_interface = lib_d3d12
+                .get_debug_interface()
+                .map_err(|err| {
+                    log::error!("D3D get debug interface error: {}", err);
+                    Error::LoadLibraryError
+                })?
+                .into_result()
+                .map_err(|err| log::warn!("Direct3D debug device is not available"))
+                .ok();
+            if let Some(dbg_interface) = dbg_interface {
+                unsafe { dbg_interface.EnableDebugLayer() };
+            }
+
+            let dxgi_info_queue = lib_dxgi
+                .get_debug_interface1()
+                .map_err(|err| {
+                    log::error!("DXGI get debug interface error: {}", err);
+                    Error::LoadLibraryError
+                })?
+                .into_result()
+                .ok();
+            if let Some(dxgi_info_queue) = dxgi_info_queue {
+                let factory = unsafe {
+                    DxgiFactory::from_factory4(
+                        lib_dxgi
+                            .create_factory2(FactoryCreationFlags::DEBUG)
+                            .map_err(|err| {
+                                log::error!("create dxgi factor2 error: {}", err);
+                                Error::LoadLibraryError
+                            })?
+                            .into_result()?,
+                    )
+                };
+
+                unsafe {
+                    HRESULT(dxgi_info_queue.SetBreakOnSeverity(
+                        dxgidebug::DXGI_DEBUG_ALL,
+                        dxgidebug::DXGI_INFO_QUEUE_MESSAGE_SEVERITY_ERROR,
+                        1,
+                    ))
+                    .ok()?;
+                    HRESULT(dxgi_info_queue.SetBreakOnSeverity(
+                        dxgidebug::DXGI_DEBUG_ALL,
+                        dxgidebug::DXGI_INFO_QUEUE_MESSAGE_SEVERITY_CORRUPTION,
+                        1,
+                    ))
+                    .ok()?;
+                }
+
+                Some(factory)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let factory = if let Some(dbg_factory) = dbg_factory {
+            dbg_factory
+        } else {
+            unsafe {
+                DxgiFactory::from_factory1(
+                    lib_dxgi
+                        .create_factory1()
+                        .map_err(|err| {
+                            log::error!("load dxgi library error: {}", err);
+                            Error::LoadLibraryError
+                        })?
+                        .into_result()?,
+                )
+            }
         };
 
         Ok(Self {
@@ -112,7 +176,7 @@ impl crate::gfx::Instance<BackendD3D12> for Instance {
             .create_device(adapter, d3d12::FeatureLevel::L11_0)
             .map_err(|err| {
                 log::error!("Create D3D12 error {}", err);
-                RenderDeviceError::LoadLibraryError
+                Error::LoadLibraryError
             })?
             .into_result()?;
         Ok(ScopedResource::new(self, Device::new(device)))

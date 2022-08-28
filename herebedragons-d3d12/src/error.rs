@@ -1,16 +1,9 @@
 use derive_more::{Display, From};
 
-#[derive(Debug, Display)]
-pub enum RenderDeviceError {
-    #[display(fmt = "Load library error")]
-    LoadLibraryError,
-}
-
-impl std::error::Error for RenderDeviceError {}
-
 #[derive(Debug, Display, From)]
 pub enum Error {
-    RenderDeviceError(RenderDeviceError),
+    #[display(fmt = "Load library error")]
+    LoadLibraryError,
     WindowsError(windows::core::Error),
 }
 
