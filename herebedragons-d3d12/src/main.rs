@@ -12,5 +12,5 @@ fn main() -> Result<()> {
     dotenv().ok();
     env_logger::init();
 
-    render_main::<BackendD3D12>(3)
+    render_main::<BackendD3D12>(800, 600, 3)
 }

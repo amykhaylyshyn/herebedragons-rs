@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
 use d3d12::{DxgiAdapter, DxgiFactory, FactoryCreationFlags};
+use raw_window_handle::RawWindowHandle;
 use winapi::{
     shared::{
         dxgi::{self, DXGI_ADAPTER_DESC1, DXGI_ADAPTER_FLAG_SOFTWARE},
-        dxgi1_6, winerror,
+        dxgi1_6, dxgiformat, dxgitype, winerror,
     },
     um::dxgidebug,
     Interface,
@@ -13,11 +14,57 @@ use windows::core::{HRESULT, HSTRING};
 
 use crate::{
     error::{Error, Result},
-    gfx::{AdapterDescription, AdapterDetails, NewInstanceOptions, ScopedResource},
+    gfx::{
+        AdapterDescription, AdapterDetails, Format, NewInstanceOptions, ScopedResource,
+        SwapChainOptions, SwapEffect,
+    },
     hresult::IntoResult,
 };
 
-use super::{Adapter, BackendD3D12, Device};
+use super::{Adapter, BackendD3D12, Device, Queue, SwapChain};
+
+struct DxgiFormat(u32);
+
+impl From<Format> for DxgiFormat {
+    fn from(format: Format) -> Self {
+        match format {
+            Format::R8G8B8A8UNorm => Self(dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM),
+        }
+    }
+}
+
+impl From<SwapEffect> for d3d12::SwapEffect {
+    fn from(swap_effect: SwapEffect) -> Self {
+        match swap_effect {
+            SwapEffect::Discard => d3d12::SwapEffect::Discard,
+            SwapEffect::Sequential => d3d12::SwapEffect::Sequential,
+            SwapEffect::FlipSequential => d3d12::SwapEffect::FlipSequential,
+            SwapEffect::FlipDiscard => d3d12::SwapEffect::FlipDiscard,
+        }
+    }
+}
+
+impl From<&SwapChainOptions> for d3d12::SwapchainDesc {
+    fn from(options: &SwapChainOptions) -> Self {
+        let format: DxgiFormat = options.format.into();
+        Self {
+            width: options.width,
+            height: options.height,
+            format: format.0,
+            stereo: false,
+            sample: d3d12::SampleDesc {
+                count: options.sample_options.sample_count as u32,
+                quality: 0,
+            },
+            buffer_usage: dxgitype::DXGI_USAGE_RENDER_TARGET_OUTPUT,
+            buffer_count: options.backbuffer_count as _,
+            scaling: d3d12::Scaling::Stretch,
+            swap_effect: options.swap_effect.into(),
+            alpha_mode: d3d12::AlphaMode::Unspecified,
+            flags: 0,
+        }
+    }
+}
 
 pub struct Instance {
     lib_d3d12: Arc<d3d12::D3D12Lib>,
@@ -44,7 +91,7 @@ impl Instance {
                     Error::LoadLibraryError
                 })?
                 .into_result()
-                .map_err(|err| log::warn!("Direct3D debug device is not available"))
+                .map_err(|err| log::warn!("Direct3D debug device is not available: {}", err))
                 .ok();
             if let Some(dbg_interface) = dbg_interface {
                 unsafe { dbg_interface.EnableDebugLayer() };
@@ -180,5 +227,26 @@ impl crate::gfx::Instance<BackendD3D12> for Instance {
             })?
             .into_result()?;
         Ok(ScopedResource::new(self, Device::new(device)))
+    }
+
+    fn create_swap_chain(
+        &self,
+        raw_window: &RawWindowHandle,
+        queue: &Queue,
+        options: &crate::gfx::SwapChainOptions,
+    ) -> Result<ScopedResource<Instance, SwapChain>> {
+        let raw_window = match raw_window {
+            RawWindowHandle::Win32(raw_window) => raw_window,
+            _ => panic!("d3d12 is supported only on windows"),
+        };
+
+        let desc = options.into();
+
+        self.factory.create_swapchain(
+            queue.queue.as_mut_ptr() as *mut _,
+            raw_window.hwnd as *mut _,
+            &desc,
+        );
+        Ok(ScopedResource::new(self, SwapChain::new()))
     }
 }

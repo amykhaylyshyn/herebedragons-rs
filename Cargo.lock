@@ -453,6 +453,7 @@ dependencies = [
  "dotenv",
  "env_logger",
  "log",
+ "raw-window-handle 0.5.0",
  "winapi",
  "windows",
  "winit",

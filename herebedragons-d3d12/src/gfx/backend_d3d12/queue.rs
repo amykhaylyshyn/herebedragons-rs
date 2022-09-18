@@ -3,7 +3,7 @@ use d3d12::CommandQueue;
 use super::BackendD3D12;
 
 pub struct Queue {
-    queue: CommandQueue,
+    pub(crate) queue: CommandQueue,
 }
 
 impl Queue {

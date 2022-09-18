@@ -2,10 +2,39 @@ pub mod backend_d3d12;
 
 use crate::error::Result;
 use derive_more::Deref;
+use raw_window_handle::RawWindowHandle;
+
+#[derive(Debug, Clone, Copy)]
+pub enum SwapEffect {
+    Discard,
+    Sequential,
+    FlipSequential,
+    FlipDiscard,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Format {
+    R8G8B8A8UNorm,
+}
 
 #[derive(Debug, Default)]
 pub struct NewInstanceOptions {
     pub enable_debug_layer: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct SampleOptions {
+    pub sample_count: usize,
+}
+
+#[derive(Debug)]
+pub struct SwapChainOptions {
+    pub backbuffer_count: usize,
+    pub swap_effect: SwapEffect,
+    pub sample_options: SampleOptions,
+    pub width: u32,
+    pub height: u32,
+    pub format: Format,
 }
 
 pub trait Backend: Sized {
@@ -17,6 +46,7 @@ pub trait Backend: Sized {
     type CommandAllocator: CommandAllocator<Self>;
     type CommandList: CommandList<Self>;
     type Fence: Fence<Self>;
+    type SwapChain: SwapChain<Self>;
 }
 
 pub trait Instance<B: Backend>: Sized {
@@ -24,6 +54,12 @@ pub trait Instance<B: Backend>: Sized {
     fn enumerate_adapters(&self) -> Result<Vec<AdapterDetails<B>>>;
     fn create_device(&self, adapter: &B::Adapter)
         -> Result<ScopedResource<B::Instance, B::Device>>;
+    fn create_swap_chain(
+        &self,
+        raw_window: &RawWindowHandle,
+        queue: &B::Queue,
+        options: &SwapChainOptions,
+    ) -> Result<ScopedResource<B::Instance, B::SwapChain>>;
 }
 
 pub trait Adapter<B: Backend> {}
@@ -43,6 +79,8 @@ pub trait CommandAllocator<B: Backend> {}
 pub trait CommandList<B: Backend> {}
 
 pub trait Fence<B: Backend> {}
+
+pub trait SwapChain<B: Backend> {}
 
 #[derive(Debug, Clone)]
 pub struct AdapterDescription {

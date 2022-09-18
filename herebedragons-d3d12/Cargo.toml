@@ -11,6 +11,7 @@ log = "0.4"
 env_logger = "0.9"
 derive_more = "0.99"
 winit = "0.27"
+raw-window-handle = "0.5"
 d3d12 = { version = "0.5", features = ["libloading"] }
 winapi = "0.3"
 windows = "0.39"

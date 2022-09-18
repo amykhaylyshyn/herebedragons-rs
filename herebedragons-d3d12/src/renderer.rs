@@ -1,8 +1,12 @@
+use raw_window_handle::HasRawWindowHandle;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::WindowBuilder;
 
-use crate::gfx::{Backend, Device, Instance, NewInstanceOptions, ScopedResource};
+use crate::gfx::{
+    Backend, Device, Format, Instance, NewInstanceOptions, SampleOptions, ScopedResource,
+    SwapChainOptions, SwapEffect,
+};
 
 use crate::error::Result;
 
@@ -11,7 +15,7 @@ struct BackbufferResources<'a, B: Backend> {
     fence: ScopedResource<'a, B::Device, B::Fence>,
 }
 
-pub fn render_main<B>(backbuffer_count: usize) -> Result<()>
+pub fn render_main<B>(width: usize, height: usize, backbuffer_count: usize) -> Result<()>
 where
     B: Backend,
 {
@@ -34,7 +38,24 @@ where
     log::info!("selected GPU: {:?}", default_adapter.description);
 
     let event_loop = EventLoop::new();
-    let window = WindowBuilder::new().build(&event_loop).unwrap();
+    let window = WindowBuilder::new()
+        .with_inner_size(winit::dpi::Size::Logical(winit::dpi::LogicalSize::new(
+            width as f64,
+            height as f64,
+        )))
+        .build(&event_loop)
+        .unwrap();
+    let window_handle = window.raw_window_handle();
+
+    let swap_chain_options = SwapChainOptions {
+        backbuffer_count,
+        swap_effect: SwapEffect::Discard,
+        sample_options: SampleOptions { sample_count: 8 },
+        width: width as _,
+        height: height as _,
+        format: Format::R8G8B8A8UNorm,
+    };
+    let swap_chain = instance.create_swap_chain(&window_handle, &queue, &swap_chain_options)?;
 
     event_loop.run(move |event, _, control_flow| {
         let _ = instance;
@@ -42,6 +63,7 @@ where
         let _ = device;
         let _ = queue;
         let _ = backbuffers;
+        let _ = swap_chain;
 
         *control_flow = ControlFlow::Wait;
 
