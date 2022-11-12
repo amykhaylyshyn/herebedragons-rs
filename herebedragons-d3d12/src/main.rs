@@ -15,6 +15,10 @@ fn main() -> Result<()> {
     dotenv().ok();
     env_logger::init();
 
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+
     let window_width = 1280f64;
     let window_height = 720f64;
     let event_loop = EventLoop::new();
@@ -26,8 +30,22 @@ fn main() -> Result<()> {
         .with_title("D3D12 Window")
         .build(&event_loop)
         .unwrap();
+    let event_loop_proxy = event_loop.create_proxy();
+
+    runtime.block_on(async move {
+        tokio::spawn(async move {
+            loop {
+                event_loop_proxy
+                    .send_event(())
+                    .expect("event loop is running");
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+        });
+    });
 
     event_loop.run(move |event, _, control_flow| {
+        let _ = runtime;
+
         *control_flow = ControlFlow::Wait;
 
         match event {
@@ -35,6 +53,9 @@ fn main() -> Result<()> {
                 event: WindowEvent::CloseRequested,
                 window_id,
             } if window_id == window.id() => control_flow.set_exit(),
+            Event::UserEvent(_) => {
+                println!("user event");
+            }
             _ => (),
         }
     });

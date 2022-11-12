@@ -16,7 +16,7 @@ raw-window-handle = "0.5"
 ron = "0.8"
 serde = { version = "1", features = ["derive"] }
 tobj = "3"
-tokio = { version = "1", features = ["rt-multi-thread"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 winapi = "0.3"
 windows = "0.43"
 winit = "0.27"
