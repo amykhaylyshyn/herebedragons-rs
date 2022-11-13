@@ -7,9 +7,14 @@ use anyhow::Result;
 use dotenv::dotenv;
 use winit::{
     event::{Event, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
+    event_loop::{ControlFlow, EventLoop, EventLoopBuilder},
     window::WindowBuilder,
 };
+
+#[derive(Debug)]
+pub enum UiUserEvent {
+    Test,
+}
 
 fn main() -> Result<()> {
     dotenv().ok();
@@ -21,7 +26,7 @@ fn main() -> Result<()> {
 
     let window_width = 1280f64;
     let window_height = 720f64;
-    let event_loop = EventLoop::new();
+    let event_loop: EventLoop<UiUserEvent> = EventLoopBuilder::with_user_event().build();
     let window = WindowBuilder::new()
         .with_inner_size(winit::dpi::Size::Logical(winit::dpi::LogicalSize::new(
             window_width,
@@ -36,7 +41,7 @@ fn main() -> Result<()> {
         tokio::spawn(async move {
             loop {
                 event_loop_proxy
-                    .send_event(())
+                    .send_event(UiUserEvent::Test)
                     .expect("event loop is running");
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }
