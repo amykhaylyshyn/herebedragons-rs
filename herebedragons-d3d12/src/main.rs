@@ -5,6 +5,7 @@ mod renderer;
 
 use anyhow::Result;
 use dotenv::dotenv;
+use gfx::{Backend, BackendD3D12, Instance};
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop, EventLoopBuilder},
@@ -17,6 +18,13 @@ pub enum UiUserEvent {
 }
 
 fn main() -> Result<()> {
+    run_with::<BackendD3D12>()
+}
+
+fn run_with<B>() -> Result<()>
+where
+    B: Backend,
+{
     dotenv().ok();
     env_logger::init();
 
@@ -37,6 +45,14 @@ fn main() -> Result<()> {
         .unwrap();
     let event_loop_proxy = event_loop.create_proxy();
 
+    let instance = B::Instance::new(Default::default())?;
+    let adapters = instance.enumerate_adapters()?;
+
+    log::info!("available adapters:");
+    for info in adapters.iter() {
+        log::info!("{:?}", info.description);
+    }
+
     runtime.block_on(async move {
         tokio::spawn(async move {
             loop {
@@ -49,7 +65,8 @@ fn main() -> Result<()> {
     });
 
     event_loop.run(move |event, _, control_flow| {
-        let _ = runtime;
+        _ = runtime;
+        _ = instance;
 
         *control_flow = ControlFlow::Wait;
 

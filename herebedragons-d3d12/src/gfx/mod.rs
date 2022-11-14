@@ -1,6 +1,7 @@
-pub mod backend_d3d12;
+mod backend_d3d12;
 
 use crate::error::Result;
+pub use backend_d3d12::BackendD3D12;
 use derive_more::Deref;
 use raw_window_handle::RawWindowHandle;
 
