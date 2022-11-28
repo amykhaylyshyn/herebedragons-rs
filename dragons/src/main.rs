@@ -1,7 +1,6 @@
 mod error;
 mod gfx;
 mod hresult;
-mod renderer;
 
 use std::fmt::Debug;
 use std::path::Path;
