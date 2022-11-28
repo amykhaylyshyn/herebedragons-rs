@@ -3,12 +3,13 @@ mod gfx;
 mod hresult;
 mod renderer;
 
-use std::{path::Path, sync::Arc};
+use std::fmt::Debug;
+use std::path::Path;
 
 use anyhow::Result;
 use dotenv::dotenv;
 use gfx::{Backend, BackendD3D12};
-use image::{Rgb, RgbaImage};
+use image::RgbaImage;
 use tokio::sync::mpsc;
 use winit::{
     event::{Event, WindowEvent},
@@ -27,6 +28,15 @@ pub struct ImageLibrary {
     pub suzanne_texture_ao_specular_reflection: RgbaImage,
     pub suzanne_texture_color: RgbaImage,
     pub suzanne_texture_normal: RgbaImage,
+}
+
+#[derive(Debug)]
+pub struct Model(Vec<tobj::Model>);
+
+pub struct ModelLibrary {
+    pub dragon: Model,
+    pub plane: Model,
+    pub suzanne: Model,
 }
 
 #[derive(Debug)]
@@ -95,6 +105,27 @@ async fn handle_control_event(event: UiToControlEvent) -> Result<()> {
     }
 }
 
+async fn load_model<P: AsRef<Path> + Debug + Send + Sync + 'static>(path: P) -> Result<Model> {
+    let (model, materials) = tobj::load_obj(path, &tobj::GPU_LOAD_OPTIONS)?;
+    _ = materials?;
+    Ok(Model(model))
+}
+
+async fn load_model_library() -> Result<ModelLibrary> {
+    log::info!("loading models...");
+    let (dragon, plane, suzanne) = tokio::try_join!(
+        load_model("resources/dragon.obj"),
+        load_model("resources/plane.obj"),
+        load_model("resources/suzanne.obj"),
+    )?;
+    log::info!("loaded models");
+    Ok(ModelLibrary {
+        dragon,
+        plane,
+        suzanne,
+    })
+}
+
 async fn load_image<P: AsRef<Path> + Send + Sync + 'static>(path: P) -> Result<RgbaImage> {
     tokio::task::spawn_blocking(move || {
         Ok::<_, anyhow::Error>(image::io::Reader::open(path)?.decode()?.into_rgba8())
@@ -141,7 +172,8 @@ async fn load_image_library() -> Result<ImageLibrary> {
 }
 
 async fn handle_started_event() -> Result<()> {
-    let image_library = load_image_library().await?;
+    let (image_library, model_library) =
+        tokio::try_join!(load_image_library(), load_model_library())?;
     Ok(())
 }
 
