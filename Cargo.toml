@@ -1,4 +1,4 @@
 [workspace]
 members = [
-    "herebedragons-d3d12"
+    "dragons"
 ]
