@@ -10,9 +10,10 @@ anyhow = "1"
 d3d12 = { version = "0.5", features = ["libloading"] }
 derive_more = "0.99"
 dotenv = "0.15"
-env_logger = "0.9"
+env_logger = "0.10"
 image = { version = "0.24", default-features = false, features = ["png"] }
 log = "0.4"
+nalgebra = "0.31"
 raw-window-handle = "0.5"
 ron = "0.8"
 serde = { version = "1", features = ["derive"] }

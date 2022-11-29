@@ -1,20 +1,26 @@
+mod assets;
+mod entity;
 mod error;
 mod gfx;
 mod hresult;
 
 use std::fmt::Debug;
-use std::path::Path;
 
 use anyhow::Result;
+use assets::Model;
 use dotenv::dotenv;
+use entity::{EntityBuilder, Transform, World};
 use gfx::{Backend, BackendD3D12};
 use image::RgbaImage;
+use nalgebra::Vector3;
 use tokio::sync::mpsc;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop, EventLoopBuilder},
     window::{Window, WindowBuilder},
 };
+
+use crate::assets::{load_image, load_model};
 
 #[derive(Debug)]
 pub struct ImageLibrary {
@@ -28,9 +34,6 @@ pub struct ImageLibrary {
     pub suzanne_texture_color: RgbaImage,
     pub suzanne_texture_normal: RgbaImage,
 }
-
-#[derive(Debug)]
-pub struct Model(Vec<tobj::Model>);
 
 pub struct ModelLibrary {
     pub dragon: Model,
@@ -104,12 +107,6 @@ async fn handle_control_event(event: UiToControlEvent) -> Result<()> {
     }
 }
 
-async fn load_model<P: AsRef<Path> + Debug + Send + Sync + 'static>(path: P) -> Result<Model> {
-    let (model, materials) = tobj::load_obj(path, &tobj::GPU_LOAD_OPTIONS)?;
-    _ = materials?;
-    Ok(Model(model))
-}
-
 async fn load_model_library() -> Result<ModelLibrary> {
     log::info!("loading models...");
     let (dragon, plane, suzanne) = tokio::try_join!(
@@ -123,13 +120,6 @@ async fn load_model_library() -> Result<ModelLibrary> {
         plane,
         suzanne,
     })
-}
-
-async fn load_image<P: AsRef<Path> + Send + Sync + 'static>(path: P) -> Result<RgbaImage> {
-    tokio::task::spawn_blocking(move || {
-        Ok::<_, anyhow::Error>(image::io::Reader::open(path)?.decode()?.into_rgba8())
-    })
-    .await?
 }
 
 async fn load_image_library() -> Result<ImageLibrary> {
@@ -170,9 +160,46 @@ async fn load_image_library() -> Result<ImageLibrary> {
     })
 }
 
+fn build_scene() -> Result<()> {
+    let mut world = World::default();
+    // camera
+    world.add(
+        EntityBuilder::default()
+            .transform(Transform::default())
+            .camera(Default::default())
+            .build(),
+    );
+    // skybox
+    world.add(EntityBuilder::default().build());
+    // suzanne
+    world.add(EntityBuilder::default().build());
+    // dragon
+    world.add(
+        EntityBuilder::default()
+            .transform(
+                Transform::default()
+                    .translate(Vector3::new(-0.1, -0.05, -0.25))
+                    .scale(0.5),
+            )
+            .build(),
+    );
+    // plane
+    world.add(
+        EntityBuilder::default()
+            .transform(
+                Transform::default()
+                    .translate(Vector3::new(0.0, -0.35, -0.5))
+                    .scale(2.0),
+            )
+            .build(),
+    );
+    Ok(())
+}
+
 async fn handle_started_event() -> Result<()> {
     let (image_library, model_library) =
         tokio::try_join!(load_image_library(), load_model_library())?;
+    build_scene()?;
     Ok(())
 }
 
