@@ -1,16 +1,12 @@
 mod assets;
 mod entity;
-mod error;
 mod gfx;
-mod hresult;
-
-use std::fmt::Debug;
 
 use anyhow::Result;
 use assets::Model;
 use dotenv::dotenv;
 use entity::{EntityBuilder, Transform, World};
-use gfx::{Backend, BackendD3D12};
+use gfx::{gl::GfxGlBackend, GfxBackend};
 use image::RgbaImage;
 use nalgebra::Vector3;
 use tokio::sync::mpsc;
@@ -52,12 +48,12 @@ pub enum UiToControlEvent {
 }
 
 fn main() -> Result<()> {
-    run_with::<BackendD3D12>()
+    run_with::<GfxGlBackend>()
 }
 
 fn run_with<B>() -> Result<()>
 where
-    B: Backend,
+    B: GfxBackend,
 {
     dotenv().ok();
     env_logger::init();
@@ -81,8 +77,6 @@ where
     control_tx
         .send(UiToControlEvent::Started)
         .expect("failed to send message");
-
-    let event_loop_proxy = event_loop.create_proxy();
 
     runtime.block_on(async move {
         tokio::spawn(async move {
