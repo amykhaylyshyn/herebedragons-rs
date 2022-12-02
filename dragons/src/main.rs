@@ -2,13 +2,24 @@ mod assets;
 mod entity;
 mod gfx;
 
+use std::{ffi::CString, num::NonZeroU32};
+
 use anyhow::Result;
 use assets::Model;
 use dotenv::dotenv;
 use entity::{EntityBuilder, Transform, World};
 use gfx::{gl::GfxGlBackend, GfxBackend};
+use glutin::{
+    config::{Config, ConfigTemplateBuilder},
+    context::{ContextApi, ContextAttributesBuilder},
+    display::GetGlDisplay,
+    prelude::*,
+    surface::{Surface, SurfaceAttributesBuilder, SwapInterval, WindowSurface},
+};
+use glutin_winit::DisplayBuilder;
 use image::RgbaImage;
 use nalgebra::Vector3;
+use raw_window_handle::HasRawWindowHandle;
 use tokio::sync::mpsc;
 use winit::{
     event::{Event, WindowEvent},
@@ -65,14 +76,39 @@ where
     let window_width = 1280f64;
     let window_height = 720f64;
     let event_loop: EventLoop<ControlToUiEvent> = EventLoopBuilder::with_user_event().build();
-    let window = WindowBuilder::new()
+
+    let window_builder = WindowBuilder::new()
         .with_inner_size(winit::dpi::Size::Logical(winit::dpi::LogicalSize::new(
             window_width,
             window_height,
         )))
-        .with_title("Demo")
-        .build(&event_loop)
-        .unwrap();
+        .with_title("Demo");
+    let template_builder = ConfigTemplateBuilder::new().with_depth_size(8);
+    let display_builder = DisplayBuilder::new().with_window_builder(Some(window_builder));
+    let (window, gl_config) = display_builder
+        .build(&event_loop, template_builder, |mut configs| {
+            configs.next().unwrap()
+        })
+        .expect("cannot find proper window config");
+    let window = window.expect("window must be valid");
+    let raw_window_handle = window.raw_window_handle();
+
+    let gl_display = gl_config.display();
+    let context_attributes = ContextAttributesBuilder::new().build(Some(raw_window_handle));
+
+    let fallback_context_attributes = ContextAttributesBuilder::new()
+        .with_context_api(ContextApi::Gles(None))
+        .build(Some(raw_window_handle));
+    let mut not_current_gl_context = Some(unsafe {
+        gl_display
+            .create_context(&gl_config, &context_attributes)
+            .unwrap_or_else(|_| {
+                gl_display
+                    .create_context(&gl_config, &fallback_context_attributes)
+                    .expect("failed to create context")
+            })
+    });
+
     let (control_tx, mut control_rx) = mpsc::unbounded_channel();
     control_tx
         .send(UiToControlEvent::Started)
@@ -88,10 +124,62 @@ where
         });
     });
 
+    let gl_window = GlWindow::new(window, &gl_config);
+    let gl_context = not_current_gl_context
+        .take()
+        .unwrap()
+        .make_current(&gl_window.surface)
+        .unwrap();
+
+    gl_window
+        .surface
+        .set_swap_interval(&gl_context, SwapInterval::Wait(NonZeroU32::new(1).unwrap()))
+        .unwrap();
+
+    let gl = gl::load_with(|symbol| {
+        let symbol = CString::new(symbol).unwrap();
+        gl_display.get_proc_address(symbol.as_c_str()).cast()
+    });
+
     event_loop.run(move |event, _, control_flow| {
-        if let Err(err) = handle_ui_event(&window, event, control_flow) {
-            log::error!("handle ui event error: {}", err);
+        control_flow.set_wait();
+
+        match event {
+            Event::RedrawEventsCleared => unsafe {
+                gl::ClearColor(0.0, 0.5, 1.0, 1.0);
+                gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
+                gl_window.window.request_redraw();
+                gl_window.surface.swap_buffers(&gl_context).unwrap();
+            },
+            Event::Resumed => {
+                // Make it current.
+            }
+            Event::Suspended => {}
+            Event::WindowEvent { event, .. } => match event {
+                WindowEvent::Resized(size) => {
+                    if size.width != 0 && size.height != 0 {
+                        // Some platforms like EGL require resizing GL surface to update the size
+                        // Notable platforms here are Wayland and macOS, other don't require it
+                        // and the function is no-op, but it's wise to resize it for portability
+                        // reasons.
+                        gl_window.surface.resize(
+                            &gl_context,
+                            NonZeroU32::new(size.width).unwrap(),
+                            NonZeroU32::new(size.height).unwrap(),
+                        );
+                    }
+                }
+                WindowEvent::CloseRequested => {
+                    control_flow.set_exit();
+                }
+                _ => (),
+            },
+            _ => (),
         }
+
+        // if let Err(err) = handle_ui_event(&window, event, control_flow) {
+        //     log::error!("handle ui event error: {}", err);
+        // }
     });
 }
 
@@ -202,8 +290,6 @@ fn handle_ui_event(
     event: winit::event::Event<ControlToUiEvent>,
     control_flow: &mut ControlFlow,
 ) -> Result<()> {
-    *control_flow = ControlFlow::Wait;
-
     match event {
         Event::WindowEvent {
             event: WindowEvent::CloseRequested,
@@ -216,4 +302,32 @@ fn handle_ui_event(
     }
 
     Ok(())
+}
+
+pub struct GlWindow {
+    // XXX the surface must be dropped before the window.
+    pub surface: Surface<WindowSurface>,
+
+    pub window: Window,
+}
+
+impl GlWindow {
+    pub fn new(window: Window, config: &Config) -> Self {
+        let (width, height): (u32, u32) = window.inner_size().into();
+        let raw_window_handle = window.raw_window_handle();
+        let attrs = SurfaceAttributesBuilder::<WindowSurface>::new().build(
+            raw_window_handle,
+            NonZeroU32::new(width).unwrap(),
+            NonZeroU32::new(height).unwrap(),
+        );
+
+        let surface = unsafe {
+            config
+                .display()
+                .create_window_surface(config, &attrs)
+                .unwrap()
+        };
+
+        Self { window, surface }
+    }
 }
