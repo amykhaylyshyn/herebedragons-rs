@@ -136,7 +136,7 @@ where
         .set_swap_interval(&gl_context, SwapInterval::Wait(NonZeroU32::new(1).unwrap()))
         .unwrap();
 
-    let gl = gl::load_with(|symbol| {
+    gl::load_with(|symbol| {
         let symbol = CString::new(symbol).unwrap();
         gl_display.get_proc_address(symbol.as_c_str()).cast()
     });
