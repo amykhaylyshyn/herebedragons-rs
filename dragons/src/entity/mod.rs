@@ -1,3 +1,8 @@
+use std::{
+    any::{Any, TypeId},
+    collections::HashMap,
+};
+
 use nalgebra::{UnitQuaternion, Vector3};
 
 pub type EntityId = u32;
@@ -49,46 +54,34 @@ impl Default for Camera {
 
 // simplified implementation of entity component system
 
-#[derive(Debug)]
-pub struct ComponentBundle {
-    pub parent: Option<Parent>,
-    pub transform: Option<Transform>,
-    pub camera: Option<Camera>,
-}
-
 #[derive(Debug, Default)]
-pub struct EntityBuilder {
-    parent: Option<Parent>,
-    transform: Option<Transform>,
-    camera: Option<Camera>,
+pub struct ComponentBundle {
+    components: HashMap<TypeId, Box<dyn Any>>,
 }
 
-impl EntityBuilder {
-    pub fn new() -> Self {
-        Self::default()
+impl ComponentBundle {
+    pub fn add_component<T: Any>(&mut self, component: T) -> Option<T> {
+        self.components
+            .insert(TypeId::of::<T>(), Box::new(component))
+            .map(|x| *x.downcast::<T>().unwrap())
     }
 
-    pub fn parent(mut self, entity: EntityId) -> Self {
-        self.parent = Some(Parent(entity));
-        self
+    pub fn component<T: Any>(&self) -> Option<&T> {
+        self.components
+            .get(&TypeId::of::<T>())
+            .map(|x| x.downcast_ref())
+            .flatten()
     }
 
-    pub fn transform(mut self, transform: Transform) -> Self {
-        self.transform = Some(transform);
-        self
+    pub fn component_mut<T: Any>(&mut self) -> Option<&mut T> {
+        self.components
+            .get_mut(&TypeId::of::<T>())
+            .map(|x| x.downcast_mut())
+            .flatten()
     }
 
-    pub fn camera(mut self, camera: Camera) -> Self {
-        self.camera = Some(camera);
-        self
-    }
-
-    pub fn build(self) -> ComponentBundle {
-        ComponentBundle {
-            parent: self.parent,
-            transform: self.transform,
-            camera: self.camera,
-        }
+    pub fn has<T: Any>(&self) -> bool {
+        self.components.contains_key(&TypeId::of::<T>())
     }
 }
 

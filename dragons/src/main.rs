@@ -7,7 +7,6 @@ use std::{ffi::CString, num::NonZeroU32};
 use anyhow::Result;
 use assets::Model;
 use dotenv::dotenv;
-use entity::{EntityBuilder, Transform, World};
 use gfx::{gl::GfxGlBackend, GfxBackend};
 use glutin::{
     config::{Config, ConfigTemplateBuilder},
@@ -18,7 +17,6 @@ use glutin::{
 };
 use glutin_winit::DisplayBuilder;
 use image::RgbaImage;
-use nalgebra::Vector3;
 use raw_window_handle::HasRawWindowHandle;
 use tokio::sync::mpsc;
 use winit::{
@@ -241,47 +239,9 @@ async fn load_image_library() -> Result<ImageLibrary> {
         suzanne_texture_normal,
     })
 }
-
-fn build_scene() -> Result<()> {
-    let mut world = World::default();
-    // camera
-    world.add(
-        EntityBuilder::default()
-            .transform(Transform::default())
-            .camera(Default::default())
-            .build(),
-    );
-    // skybox
-    world.add(EntityBuilder::default().build());
-    // suzanne
-    world.add(EntityBuilder::default().build());
-    // dragon
-    world.add(
-        EntityBuilder::default()
-            .transform(
-                Transform::default()
-                    .translate(Vector3::new(-0.1, -0.05, -0.25))
-                    .scale(0.5),
-            )
-            .build(),
-    );
-    // plane
-    world.add(
-        EntityBuilder::default()
-            .transform(
-                Transform::default()
-                    .translate(Vector3::new(0.0, -0.35, -0.5))
-                    .scale(2.0),
-            )
-            .build(),
-    );
-    Ok(())
-}
-
 async fn handle_started_event() -> Result<()> {
     let (image_library, model_library) =
         tokio::try_join!(load_image_library(), load_model_library())?;
-    build_scene()?;
     Ok(())
 }
 
