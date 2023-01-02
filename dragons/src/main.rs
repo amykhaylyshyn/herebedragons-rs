@@ -1,5 +1,6 @@
 mod app;
 mod assets;
+mod gfx;
 
 use std::{ffi::CString, num::NonZeroU32};
 
