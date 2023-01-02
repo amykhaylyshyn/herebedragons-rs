@@ -1,13 +1,10 @@
 mod assets;
-mod entity;
-mod gfx;
 
 use std::{ffi::CString, num::NonZeroU32};
 
 use anyhow::Result;
 use assets::Model;
 use dotenv::dotenv;
-use gfx::{gl::GfxGlBackend, GfxBackend};
 use glutin::{
     config::{Config, ConfigTemplateBuilder},
     context::{ContextApi, ContextAttributesBuilder},
@@ -57,13 +54,6 @@ pub enum UiToControlEvent {
 }
 
 fn main() -> Result<()> {
-    run_with::<GfxGlBackend>()
-}
-
-fn run_with<B>() -> Result<()>
-where
-    B: GfxBackend,
-{
     dotenv().ok();
     env_logger::init();
 
@@ -174,10 +164,6 @@ where
             },
             _ => (),
         }
-
-        // if let Err(err) = handle_ui_event(&window, event, control_flow) {
-        //     log::error!("handle ui event error: {}", err);
-        // }
     });
 }
 
