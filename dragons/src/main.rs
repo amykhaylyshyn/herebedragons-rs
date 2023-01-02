@@ -1,47 +1,25 @@
+mod app;
 mod assets;
 
 use std::{ffi::CString, num::NonZeroU32};
 
 use anyhow::Result;
-use assets::Model;
 use dotenv::dotenv;
 use glutin::{
     config::{Config, ConfigTemplateBuilder},
-    context::{ContextApi, ContextAttributesBuilder},
+    context::{ContextApi, ContextAttributesBuilder, NotCurrentContext},
     display::GetGlDisplay,
     prelude::*,
     surface::{Surface, SurfaceAttributesBuilder, SwapInterval, WindowSurface},
 };
 use glutin_winit::DisplayBuilder;
-use image::RgbaImage;
 use raw_window_handle::HasRawWindowHandle;
 use tokio::sync::mpsc;
 use winit::{
     event::{Event, WindowEvent},
-    event_loop::{ControlFlow, EventLoop, EventLoopBuilder},
+    event_loop::{EventLoop, EventLoopBuilder, EventLoopWindowTarget},
     window::{Window, WindowBuilder},
 };
-
-use crate::assets::{load_image, load_model};
-
-#[derive(Debug)]
-pub struct ImageLibrary {
-    pub dragon_texture_ao_specular_reflection: RgbaImage,
-    pub dragon_texture_color: RgbaImage,
-    pub dragon_texture_normal: RgbaImage,
-    pub plane_texture_color: RgbaImage,
-    pub plane_texture_depthmap: RgbaImage,
-    pub plane_texture_normal: RgbaImage,
-    pub suzanne_texture_ao_specular_reflection: RgbaImage,
-    pub suzanne_texture_color: RgbaImage,
-    pub suzanne_texture_normal: RgbaImage,
-}
-
-pub struct ModelLibrary {
-    pub dragon: Model,
-    pub plane: Model,
-    pub suzanne: Model,
-}
 
 #[derive(Debug)]
 pub enum ControlToUiEvent {
@@ -71,31 +49,18 @@ fn main() -> Result<()> {
             window_height,
         )))
         .with_title("Demo");
-    let template_builder = ConfigTemplateBuilder::new().with_depth_size(8);
-    let display_builder = DisplayBuilder::new().with_window_builder(Some(window_builder));
-    let (window, gl_config) = display_builder
-        .build(&event_loop, template_builder, |mut configs| {
-            configs.next().unwrap()
-        })
-        .expect("cannot find proper window config");
-    let window = window.expect("window must be valid");
-    let raw_window_handle = window.raw_window_handle();
+    let (gl_window, mut maybe_gl_context) = init_gl_window(&event_loop, window_builder)?;
 
-    let gl_display = gl_config.display();
-    let context_attributes = ContextAttributesBuilder::new().build(Some(raw_window_handle));
+    let gl_context = maybe_gl_context
+        .take()
+        .unwrap()
+        .make_current(&gl_window.surface)
+        .unwrap();
 
-    let fallback_context_attributes = ContextAttributesBuilder::new()
-        .with_context_api(ContextApi::Gles(None))
-        .build(Some(raw_window_handle));
-    let mut not_current_gl_context = Some(unsafe {
-        gl_display
-            .create_context(&gl_config, &context_attributes)
-            .unwrap_or_else(|_| {
-                gl_display
-                    .create_context(&gl_config, &fallback_context_attributes)
-                    .expect("failed to create context")
-            })
-    });
+    gl_window
+        .surface
+        .set_swap_interval(&gl_context, SwapInterval::Wait(NonZeroU32::new(1).unwrap()))
+        .unwrap();
 
     let (control_tx, mut control_rx) = mpsc::unbounded_channel();
     control_tx
@@ -110,23 +75,6 @@ fn main() -> Result<()> {
                 }
             }
         });
-    });
-
-    let gl_window = GlWindow::new(window, &gl_config);
-    let gl_context = not_current_gl_context
-        .take()
-        .unwrap()
-        .make_current(&gl_window.surface)
-        .unwrap();
-
-    gl_window
-        .surface
-        .set_swap_interval(&gl_context, SwapInterval::Wait(NonZeroU32::new(1).unwrap()))
-        .unwrap();
-
-    gl::load_with(|symbol| {
-        let symbol = CString::new(symbol).unwrap();
-        gl_display.get_proc_address(symbol.as_c_str()).cast()
     });
 
     event_loop.run(move |event, _, control_flow| {
@@ -173,87 +121,51 @@ async fn handle_control_event(event: UiToControlEvent) -> Result<()> {
     }
 }
 
-async fn load_model_library() -> Result<ModelLibrary> {
-    log::info!("loading models...");
-    let (dragon, plane, suzanne) = tokio::try_join!(
-        load_model("resources/dragon.obj"),
-        load_model("resources/plane.obj"),
-        load_model("resources/suzanne.obj"),
-    )?;
-    log::info!("loaded models");
-    Ok(ModelLibrary {
-        dragon,
-        plane,
-        suzanne,
-    })
-}
-
-async fn load_image_library() -> Result<ImageLibrary> {
-    log::info!("loading images...");
-    let (
-        dragon_texture_ao_specular_reflection,
-        dragon_texture_color,
-        dragon_texture_normal,
-        plane_texture_color,
-        plane_texture_depthmap,
-        plane_texture_normal,
-        suzanne_texture_ao_specular_reflection,
-        suzanne_texture_color,
-        suzanne_texture_normal,
-    ) = tokio::try_join!(
-        load_image("resources/dragon_texture_ao_specular_reflection.png"),
-        load_image("resources/dragon_texture_color.png"),
-        load_image("resources/dragon_texture_normal.png"),
-        load_image("resources/plane_texture_color.png"),
-        load_image("resources/plane_texture_depthmap.png"),
-        load_image("resources/plane_texture_normal.png"),
-        load_image("resources/suzanne_texture_ao_specular_reflection.png"),
-        load_image("resources/suzanne_texture_color.png"),
-        load_image("resources/suzanne_texture_normal.png"),
-    )?;
-    log::info!("loaded images");
-
-    Ok(ImageLibrary {
-        dragon_texture_ao_specular_reflection,
-        dragon_texture_color,
-        dragon_texture_normal,
-        plane_texture_color,
-        plane_texture_depthmap,
-        plane_texture_normal,
-        suzanne_texture_ao_specular_reflection,
-        suzanne_texture_color,
-        suzanne_texture_normal,
-    })
-}
 async fn handle_started_event() -> Result<()> {
-    let (image_library, model_library) =
-        tokio::try_join!(load_image_library(), load_model_library())?;
     Ok(())
 }
 
-fn handle_ui_event(
-    window: &Window,
-    event: winit::event::Event<ControlToUiEvent>,
-    control_flow: &mut ControlFlow,
-) -> Result<()> {
-    match event {
-        Event::WindowEvent {
-            event: WindowEvent::CloseRequested,
-            window_id,
-        } if window_id == window.id() => control_flow.set_exit(),
-        Event::UserEvent(_) => {
-            println!("user event");
-        }
-        _ => (),
-    }
+fn init_gl_window<T: 'static>(
+    event_loop: &EventLoopWindowTarget<T>,
+    window_builder: WindowBuilder,
+) -> Result<(GlWindow, Option<NotCurrentContext>)> {
+    let template_builder = ConfigTemplateBuilder::new().with_depth_size(8);
+    let display_builder = DisplayBuilder::new().with_window_builder(Some(window_builder));
+    let (window, gl_config) = display_builder
+        .build(&event_loop, template_builder, |mut configs| {
+            configs.next().unwrap()
+        })
+        .expect("cannot find proper window config");
+    let window = window.expect("window must be valid");
+    let raw_window_handle = window.raw_window_handle();
 
-    Ok(())
+    let gl_display = gl_config.display();
+    gl::load_with(|symbol| {
+        let symbol = CString::new(symbol).unwrap();
+        gl_display.get_proc_address(symbol.as_c_str()).cast()
+    });
+
+    let context_attributes = ContextAttributesBuilder::new().build(Some(raw_window_handle));
+
+    let fallback_context_attributes = ContextAttributesBuilder::new()
+        .with_context_api(ContextApi::Gles(None))
+        .build(Some(raw_window_handle));
+    let maybe_gl_context = Some(unsafe {
+        gl_display
+            .create_context(&gl_config, &context_attributes)
+            .unwrap_or_else(|_| {
+                gl_display
+                    .create_context(&gl_config, &fallback_context_attributes)
+                    .expect("failed to create context")
+            })
+    });
+
+    Ok((GlWindow::new(window, &gl_config), maybe_gl_context))
 }
 
 pub struct GlWindow {
     // XXX the surface must be dropped before the window.
     pub surface: Surface<WindowSurface>,
-
     pub window: Window,
 }
 
