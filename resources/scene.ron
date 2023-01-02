@@ -22,16 +22,27 @@ Scene (
             }
         )
     },
-    objects: [(
-        mesh: "suzanne.obj",
-        material_name: "suzanne",
+    objects: {
+        "suzanne": (
+            mesh: "suzanne.obj",
+            material_name: "suzanne",
+        ),
+        "plane": (
+            mesh: "plane.obj",
+            material_name: "plane",
+        ),
+        "dragon": (
+            mesh: "dragon.obj",
+            material_name: "dragon",
+        )
+    },
+    instances: [(
+        object: "suzanne",
     ), (
-        mesh: "plane.obj",
-        material_name: "plane",
-        offset: (0.0, -0.35, -0.5),
+        object: "plane",
+        offset: Some((0.0, -0.35, -0.5)),
     ), (
-        mesh: "dragon.obj",
-        material_name: "dragon",
-        offset: (-0.1, -0.05, -0.25),
+        object: "dragon",
+        offset: Some((-0.1, -0.05, -0.25)),
     )]
 )

@@ -1,11 +1,12 @@
-mod app;
 mod assets;
-mod gfx;
+mod gl_utils;
+mod scene;
 
-use std::{ffi::CString, num::NonZeroU32};
+use std::{ffi::CString, fs::read_to_string, num::NonZeroU32, path::PathBuf};
 
 use anyhow::Result;
 use dotenv::dotenv;
+use gl_utils::mesh::Mesh;
 use glutin::{
     config::{Config, ConfigTemplateBuilder},
     context::{ContextApi, ContextAttributesBuilder, NotCurrentContext},
@@ -15,6 +16,7 @@ use glutin::{
 };
 use glutin_winit::DisplayBuilder;
 use raw_window_handle::HasRawWindowHandle;
+use scene::Scene;
 use tokio::sync::mpsc;
 use winit::{
     event::{Event, WindowEvent},
@@ -77,6 +79,20 @@ fn main() -> Result<()> {
             }
         });
     });
+
+    let resources_path = "resources";
+    let scene_path: PathBuf = [resources_path, "scene.ron"].iter().collect();
+
+    let scene_ron = read_to_string(scene_path)?;
+    let scene: Scene = ron::from_str(&scene_ron)?;
+    let meshes = scene
+        .objects
+        .values()
+        .map(|obj| {
+            let mesh_path: PathBuf = [resources_path, &obj.mesh].iter().collect();
+            Mesh::from_obj(&gl_context, mesh_path)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
     event_loop.run(move |event, _, control_flow| {
         control_flow.set_wait();
