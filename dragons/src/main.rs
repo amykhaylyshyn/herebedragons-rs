@@ -1,151 +1,146 @@
-mod assets;
-mod gl_utils;
-mod scene;
+// Copyright 2015 Brendan Zabarauskas and the gl-rs developers
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
-use std::{ffi::CString, fs::read_to_string, num::NonZeroU32, path::PathBuf};
+extern crate gl;
+extern crate glutin;
 
-use anyhow::Result;
-use dotenv::dotenv;
-use gl_utils::mesh::Mesh;
-use glutin::{
-    config::{Config, ConfigTemplateBuilder},
-    context::{ContextApi, ContextAttributesBuilder, NotCurrentContext},
-    display::GetGlDisplay,
-    prelude::*,
-    surface::{Surface, SurfaceAttributesBuilder, SwapInterval, WindowSurface},
-};
+use gl::types::*;
+use glutin::config::Config;
+use glutin::config::ConfigTemplateBuilder;
+use glutin::context::ContextApi;
+use glutin::context::ContextAttributesBuilder;
+use glutin::display::GetGlDisplay;
+use glutin::prelude::GlDisplay;
+use glutin::prelude::NotCurrentGlContextSurfaceAccessor;
+use glutin::surface::GlSurface;
+use glutin::surface::Surface;
+use glutin::surface::SurfaceAttributesBuilder;
+use glutin::surface::WindowSurface;
 use glutin_winit::DisplayBuilder;
 use raw_window_handle::HasRawWindowHandle;
-use scene::Scene;
-use tokio::sync::mpsc;
-use winit::{
-    event::{Event, WindowEvent},
-    event_loop::{EventLoop, EventLoopBuilder, EventLoopWindowTarget},
-    window::{Window, WindowBuilder},
-};
+use std::ffi::CString;
+use std::mem;
+use std::num::NonZeroU32;
+use std::ptr;
+use std::str;
+use winit::event::Event;
+use winit::event::WindowEvent;
+use winit::event_loop::ControlFlow;
+use winit::event_loop::EventLoop;
+use winit::window::Window;
+use winit::window::WindowBuilder;
 
-#[derive(Debug)]
-pub enum ControlToUiEvent {
-    Test,
+// Vertex data
+static VERTEX_DATA: [GLfloat; 6] = [0.0, 0.5, 0.5, -0.5, -0.5, -0.5];
+
+// Shader sources
+static VS_SRC: &'static str = "
+#version 150
+in vec2 position;
+
+void main() {
+    gl_Position = vec4(position, 0.0, 1.0);
+}";
+
+static FS_SRC: &'static str = "
+#version 150
+out vec4 out_color;
+
+void main() {
+    out_color = vec4(1.0, 1.0, 1.0, 1.0);
+}";
+
+fn compile_shader(src: &str, ty: GLenum) -> GLuint {
+    let shader;
+    unsafe {
+        shader = gl::CreateShader(ty);
+        // Attempt to compile the shader
+        let c_str = CString::new(src.as_bytes()).unwrap();
+        gl::ShaderSource(shader, 1, &c_str.as_ptr(), ptr::null());
+        gl::CompileShader(shader);
+
+        // Get the compile status
+        let mut status = gl::FALSE as GLint;
+        gl::GetShaderiv(shader, gl::COMPILE_STATUS, &mut status);
+
+        // Fail on error
+        if status != (gl::TRUE as GLint) {
+            let mut len = 0;
+            gl::GetShaderiv(shader, gl::INFO_LOG_LENGTH, &mut len);
+            let mut buf = Vec::with_capacity(len as usize);
+            buf.set_len((len as usize) - 1); // subtract 1 to skip the trailing null character
+            gl::GetShaderInfoLog(
+                shader,
+                len,
+                ptr::null_mut(),
+                buf.as_mut_ptr() as *mut GLchar,
+            );
+            panic!(
+                "{}",
+                str::from_utf8(&buf)
+                    .ok()
+                    .expect("ShaderInfoLog not valid utf8")
+            );
+        }
+    }
+    shader
 }
 
-#[derive(Debug)]
-pub enum UiToControlEvent {
-    Started,
+fn link_program(vs: GLuint, fs: GLuint) -> GLuint {
+    unsafe {
+        let program = gl::CreateProgram();
+        gl::AttachShader(program, vs);
+        gl::AttachShader(program, fs);
+        gl::LinkProgram(program);
+        // Get the link status
+        let mut status = gl::FALSE as GLint;
+        gl::GetProgramiv(program, gl::LINK_STATUS, &mut status);
+
+        // Fail on error
+        if status != (gl::TRUE as GLint) {
+            let mut len: GLint = 0;
+            gl::GetProgramiv(program, gl::INFO_LOG_LENGTH, &mut len);
+            let mut buf = Vec::with_capacity(len as usize);
+            buf.set_len((len as usize) - 1); // subtract 1 to skip the trailing null character
+            gl::GetProgramInfoLog(
+                program,
+                len,
+                ptr::null_mut(),
+                buf.as_mut_ptr() as *mut GLchar,
+            );
+            panic!(
+                "{}",
+                str::from_utf8(&buf)
+                    .ok()
+                    .expect("ProgramInfoLog not valid utf8")
+            );
+        }
+        program
+    }
 }
 
-fn main() -> Result<()> {
-    dotenv().ok();
-    env_logger::init();
-
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?;
+fn main() {
+    let event_loop = EventLoop::new();
 
     let window_width = 1280f64;
     let window_height = 720f64;
-    let event_loop: EventLoop<ControlToUiEvent> = EventLoopBuilder::with_user_event().build();
-
     let window_builder = WindowBuilder::new()
         .with_inner_size(winit::dpi::Size::Logical(winit::dpi::LogicalSize::new(
             window_width,
             window_height,
         )))
         .with_title("Demo");
-    let (gl_window, mut maybe_gl_context) = init_gl_window(&event_loop, window_builder)?;
-
-    let gl_context = maybe_gl_context
-        .take()
-        .unwrap()
-        .make_current(&gl_window.surface)
-        .unwrap();
-
-    gl_window
-        .surface
-        .set_swap_interval(&gl_context, SwapInterval::Wait(NonZeroU32::new(1).unwrap()))
-        .unwrap();
-
-    let (control_tx, mut control_rx) = mpsc::unbounded_channel();
-    control_tx
-        .send(UiToControlEvent::Started)
-        .expect("failed to send message");
-
-    runtime.block_on(async move {
-        tokio::spawn(async move {
-            while let Some(evt) = control_rx.recv().await {
-                if let Err(err) = handle_control_event(evt).await {
-                    log::error!("handle control event error: {}", err);
-                }
-            }
-        });
-    });
-
-    let resources_path = "resources";
-    let scene_path: PathBuf = [resources_path, "scene.ron"].iter().collect();
-
-    let scene_ron = read_to_string(scene_path)?;
-    let scene: Scene = ron::from_str(&scene_ron)?;
-    let meshes = scene
-        .objects
-        .values()
-        .map(|obj| {
-            let mesh_path: PathBuf = [resources_path, &obj.mesh].iter().collect();
-            Mesh::from_obj(&gl_context, mesh_path)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    event_loop.run(move |event, _, control_flow| {
-        control_flow.set_wait();
-
-        match event {
-            Event::RedrawEventsCleared => unsafe {
-                gl::ClearColor(0.0, 0.5, 1.0, 1.0);
-                gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
-                gl_window.window.request_redraw();
-                gl_window.surface.swap_buffers(&gl_context).unwrap();
-            },
-            Event::Resumed => {
-                // Make it current.
-            }
-            Event::Suspended => {}
-            Event::WindowEvent { event, .. } => match event {
-                WindowEvent::Resized(size) => {
-                    if size.width != 0 && size.height != 0 {
-                        // Some platforms like EGL require resizing GL surface to update the size
-                        // Notable platforms here are Wayland and macOS, other don't require it
-                        // and the function is no-op, but it's wise to resize it for portability
-                        // reasons.
-                        gl_window.surface.resize(
-                            &gl_context,
-                            NonZeroU32::new(size.width).unwrap(),
-                            NonZeroU32::new(size.height).unwrap(),
-                        );
-                    }
-                }
-                WindowEvent::CloseRequested => {
-                    control_flow.set_exit();
-                }
-                _ => (),
-            },
-            _ => (),
-        }
-    });
-}
-
-async fn handle_control_event(event: UiToControlEvent) -> Result<()> {
-    match event {
-        UiToControlEvent::Started => handle_started_event().await,
-    }
-}
-
-async fn handle_started_event() -> Result<()> {
-    Ok(())
-}
-
-fn init_gl_window<T: 'static>(
-    event_loop: &EventLoopWindowTarget<T>,
-    window_builder: WindowBuilder,
-) -> Result<(GlWindow, Option<NotCurrentContext>)> {
     let template_builder = ConfigTemplateBuilder::new().with_depth_size(8);
     let display_builder = DisplayBuilder::new().with_window_builder(Some(window_builder));
     let (window, gl_config) = display_builder
@@ -157,17 +152,13 @@ fn init_gl_window<T: 'static>(
     let raw_window_handle = window.raw_window_handle();
 
     let gl_display = gl_config.display();
-    gl::load_with(|symbol| {
-        let symbol = CString::new(symbol).unwrap();
-        gl_display.get_proc_address(symbol.as_c_str()).cast()
-    });
 
     let context_attributes = ContextAttributesBuilder::new().build(Some(raw_window_handle));
 
     let fallback_context_attributes = ContextAttributesBuilder::new()
         .with_context_api(ContextApi::Gles(None))
         .build(Some(raw_window_handle));
-    let maybe_gl_context = Some(unsafe {
+    let mut maybe_gl_context = Some(unsafe {
         gl_display
             .create_context(&gl_config, &context_attributes)
             .unwrap_or_else(|_| {
@@ -177,7 +168,91 @@ fn init_gl_window<T: 'static>(
             })
     });
 
-    Ok((GlWindow::new(window, &gl_config), maybe_gl_context))
+    let gl_window = GlWindow::new(window, &gl_config);
+
+    let gl_context = maybe_gl_context
+        .take()
+        .unwrap()
+        .make_current(&gl_window.surface)
+        .unwrap();
+
+    gl::load_with(|symbol| {
+        let symbol = CString::new(symbol).unwrap();
+        gl_display.get_proc_address(symbol.as_c_str()).cast()
+    });
+
+    // Create GLSL shaders
+    let vs = compile_shader(VS_SRC, gl::VERTEX_SHADER);
+    let fs = compile_shader(FS_SRC, gl::FRAGMENT_SHADER);
+    let program = link_program(vs, fs);
+
+    let mut vao = 0;
+    let mut vbo = 0;
+
+    unsafe {
+        // Create Vertex Array Object
+        gl::GenVertexArrays(1, &mut vao);
+        gl::BindVertexArray(vao);
+
+        // Create a Vertex Buffer Object and copy the vertex data to it
+        gl::GenBuffers(1, &mut vbo);
+        gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
+        gl::BufferData(
+            gl::ARRAY_BUFFER,
+            (VERTEX_DATA.len() * mem::size_of::<GLfloat>()) as GLsizeiptr,
+            mem::transmute(&VERTEX_DATA[0]),
+            gl::STATIC_DRAW,
+        );
+
+        // Use shader program
+        gl::UseProgram(program);
+        gl::BindFragDataLocation(program, 0, CString::new("out_color").unwrap().as_ptr());
+
+        // Specify the layout of the vertex data
+        let pos_attr = gl::GetAttribLocation(program, CString::new("position").unwrap().as_ptr());
+        gl::EnableVertexAttribArray(pos_attr as GLuint);
+        gl::VertexAttribPointer(
+            pos_attr as GLuint,
+            2,
+            gl::FLOAT,
+            gl::FALSE as GLboolean,
+            0,
+            ptr::null(),
+        );
+    }
+
+    event_loop.run(move |event, _, control_flow| {
+        *control_flow = ControlFlow::Wait;
+        match event {
+            Event::LoopDestroyed => return,
+            Event::WindowEvent { event, .. } => match event {
+                WindowEvent::CloseRequested => {
+                    // Cleanup
+                    unsafe {
+                        gl::DeleteProgram(program);
+                        gl::DeleteShader(fs);
+                        gl::DeleteShader(vs);
+                        gl::DeleteBuffers(1, &vbo);
+                        gl::DeleteVertexArrays(1, &vao);
+                    }
+                    *control_flow = ControlFlow::Exit
+                }
+                _ => (),
+            },
+            Event::RedrawEventsCleared => {
+                unsafe {
+                    // Clear the screen to black
+                    gl::ClearColor(0.3, 0.3, 0.3, 1.0);
+                    gl::Clear(gl::COLOR_BUFFER_BIT);
+                    // Draw a triangle from the 3 vertices
+                    gl::DrawArrays(gl::TRIANGLES, 0, 3);
+                }
+                gl_window.window.request_redraw();
+                gl_window.surface.swap_buffers(&gl_context).unwrap();
+            }
+            _ => (),
+        }
+    });
 }
 
 pub struct GlWindow {
