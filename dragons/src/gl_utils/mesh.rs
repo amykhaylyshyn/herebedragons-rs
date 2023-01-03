@@ -5,10 +5,11 @@ use glutin::context::PossiblyCurrentContext;
 
 use super::primitives::{Buffer, BufferType};
 
+#[repr(C)]
 struct Vertex {
     position: [f32; 3],
     normal: [f32; 3],
-    tex_coord: [f32; 3],
+    tex_coord: [f32; 2],
 }
 
 pub struct Mesh<'a> {
@@ -22,7 +23,7 @@ impl<'a> Mesh<'a> {
         path: P,
     ) -> Result<Vec<Self>> {
         let (models, materials_result) = tobj::load_obj(path, &tobj::GPU_LOAD_OPTIONS)?;
-        let materials = materials_result?;
+        _ = materials_result?;
 
         let mut meshes = Vec::with_capacity(models.len());
         for model in models.into_iter() {
@@ -35,7 +36,7 @@ impl<'a> Mesh<'a> {
                 let vertex = Vertex {
                     position: [mesh.positions[v1], mesh.positions[v2], mesh.positions[v3]],
                     normal: [mesh.normals[v1], mesh.normals[v2], mesh.normals[v3]],
-                    tex_coord: [mesh.texcoords[v1], mesh.texcoords[v2], mesh.texcoords[v3]],
+                    tex_coord: [mesh.texcoords[i * 2], mesh.texcoords[i * 2 + 1]],
                 };
                 vertices.push(vertex);
             }
