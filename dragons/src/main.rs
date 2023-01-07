@@ -35,6 +35,8 @@ use std::num::NonZeroU32;
 use std::ptr;
 use std::str;
 use winit::event::Event;
+use winit::event::KeyboardInput;
+use winit::event::VirtualKeyCode;
 use winit::event::WindowEvent;
 use winit::event_loop::ControlFlow;
 use winit::event_loop::EventLoop;
@@ -222,21 +224,24 @@ fn main() {
     }
 
     event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Wait;
+        control_flow.set_wait();
         match event {
             Event::LoopDestroyed => return,
-            Event::WindowEvent { event, .. } => match event {
-                WindowEvent::CloseRequested => {
-                    // Cleanup
-                    unsafe {
-                        gl::DeleteProgram(program);
-                        gl::DeleteShader(fs);
-                        gl::DeleteShader(vs);
-                        gl::DeleteBuffers(1, &vbo);
-                        gl::DeleteVertexArrays(1, &vao);
+            Event::DeviceEvent { event, .. } => match event {
+                winit::event::DeviceEvent::Key(KeyboardInput {
+                    virtual_keycode, ..
+                }) => {
+                    if let Some(virtual_keycode) = virtual_keycode {
+                        match virtual_keycode {
+                            VirtualKeyCode::Escape => control_flow.set_exit(),
+                            _ => (),
+                        }
                     }
-                    *control_flow = ControlFlow::Exit
                 }
+                _ => (),
+            },
+            Event::WindowEvent { event, .. } => match event {
+                WindowEvent::CloseRequested => control_flow.set_exit(),
                 _ => (),
             },
             Event::RedrawEventsCleared => {
@@ -251,6 +256,17 @@ fn main() {
                 gl_window.surface.swap_buffers(&gl_context).unwrap();
             }
             _ => (),
+        }
+
+        if control_flow == &ControlFlow::Exit {
+            // Cleanup
+            unsafe {
+                gl::DeleteProgram(program);
+                gl::DeleteShader(fs);
+                gl::DeleteShader(vs);
+                gl::DeleteBuffers(1, &vbo);
+                gl::DeleteVertexArrays(1, &vao);
+            }
         }
     });
 }
