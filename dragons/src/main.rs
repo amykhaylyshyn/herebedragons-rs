@@ -1,299 +1,467 @@
-// Copyright 2015 Brendan Zabarauskas and the gl-rs developers
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+mod app;
 
-extern crate gl;
-extern crate glutin;
+use app::{Example, Spawner};
+use bytemuck::{Pod, Zeroable};
+use std::{borrow::Cow, f32::consts};
+use wgpu::{util::DeviceExt, AstcBlock, AstcChannel};
 
-use gl::types::*;
-use glutin::config::Config;
-use glutin::config::ConfigTemplateBuilder;
-use glutin::context::ContextApi;
-use glutin::context::ContextAttributesBuilder;
-use glutin::display::GetGlDisplay;
-use glutin::prelude::GlDisplay;
-use glutin::prelude::NotCurrentGlContextSurfaceAccessor;
-use glutin::surface::GlSurface;
-use glutin::surface::Surface;
-use glutin::surface::SurfaceAttributesBuilder;
-use glutin::surface::WindowSurface;
-use glutin_winit::DisplayBuilder;
-use raw_window_handle::HasRawWindowHandle;
-use std::ffi::CString;
-use std::mem;
-use std::num::NonZeroU32;
-use std::ptr;
-use std::str;
-use winit::event::Event;
-use winit::event::KeyboardInput;
-use winit::event::VirtualKeyCode;
-use winit::event::WindowEvent;
-use winit::event_loop::ControlFlow;
-use winit::event_loop::EventLoop;
-use winit::window::Window;
-use winit::window::WindowBuilder;
-
-// Vertex data
-static VERTEX_DATA: [GLfloat; 6] = [0.0, 0.5, 0.5, -0.5, -0.5, -0.5];
-
-// Shader sources
-static VS_SRC: &'static str = "
-#version 150
-in vec2 position;
-
-void main() {
-    gl_Position = vec4(position, 0.0, 1.0);
-}";
-
-static FS_SRC: &'static str = "
-#version 150
-out vec4 out_color;
-
-void main() {
-    out_color = vec4(1.0, 1.0, 1.0, 1.0);
-}";
-
-fn compile_shader(src: &str, ty: GLenum) -> GLuint {
-    let shader;
-    unsafe {
-        shader = gl::CreateShader(ty);
-        // Attempt to compile the shader
-        let c_str = CString::new(src.as_bytes()).unwrap();
-        gl::ShaderSource(shader, 1, &c_str.as_ptr(), ptr::null());
-        gl::CompileShader(shader);
-
-        // Get the compile status
-        let mut status = gl::FALSE as GLint;
-        gl::GetShaderiv(shader, gl::COMPILE_STATUS, &mut status);
-
-        // Fail on error
-        if status != (gl::TRUE as GLint) {
-            let mut len = 0;
-            gl::GetShaderiv(shader, gl::INFO_LOG_LENGTH, &mut len);
-            let mut buf = Vec::with_capacity(len as usize);
-            buf.set_len((len as usize) - 1); // subtract 1 to skip the trailing null character
-            gl::GetShaderInfoLog(
-                shader,
-                len,
-                ptr::null_mut(),
-                buf.as_mut_ptr() as *mut GLchar,
-            );
-            panic!(
-                "{}",
-                str::from_utf8(&buf)
-                    .ok()
-                    .expect("ShaderInfoLog not valid utf8")
-            );
-        }
-    }
-    shader
-}
-
-fn link_program(vs: GLuint, fs: GLuint) -> GLuint {
-    unsafe {
-        let program = gl::CreateProgram();
-        gl::AttachShader(program, vs);
-        gl::AttachShader(program, fs);
-        gl::LinkProgram(program);
-        // Get the link status
-        let mut status = gl::FALSE as GLint;
-        gl::GetProgramiv(program, gl::LINK_STATUS, &mut status);
-
-        // Fail on error
-        if status != (gl::TRUE as GLint) {
-            let mut len: GLint = 0;
-            gl::GetProgramiv(program, gl::INFO_LOG_LENGTH, &mut len);
-            let mut buf = Vec::with_capacity(len as usize);
-            buf.set_len((len as usize) - 1); // subtract 1 to skip the trailing null character
-            gl::GetProgramInfoLog(
-                program,
-                len,
-                ptr::null_mut(),
-                buf.as_mut_ptr() as *mut GLchar,
-            );
-            panic!(
-                "{}",
-                str::from_utf8(&buf)
-                    .ok()
-                    .expect("ProgramInfoLog not valid utf8")
-            );
-        }
-        program
-    }
-}
+const IMAGE_SIZE: u32 = 128;
 
 fn main() {
-    let event_loop = EventLoop::new();
+    dotenv::dotenv().ok();
+    app::run::<DragonsApp>("Dragons");
+}
 
-    let window_width = 1280f64;
-    let window_height = 720f64;
-    let window_builder = WindowBuilder::new()
-        .with_inner_size(winit::dpi::Size::Logical(winit::dpi::LogicalSize::new(
-            window_width,
-            window_height,
-        )))
-        .with_title("Demo");
-    let template_builder = ConfigTemplateBuilder::new().with_depth_size(8);
-    let display_builder = DisplayBuilder::new().with_window_builder(Some(window_builder));
-    let (window, gl_config) = display_builder
-        .build(&event_loop, template_builder, |mut configs| {
-            configs.next().unwrap()
-        })
-        .expect("cannot find proper window config");
-    let window = window.expect("window must be valid");
-    let raw_window_handle = window.raw_window_handle();
+#[derive(Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
+struct Vertex {
+    pos: [f32; 3],
+    normal: [f32; 3],
+}
 
-    let gl_display = gl_config.display();
+struct Entity {
+    vertex_count: u32,
+    vertex_buf: wgpu::Buffer,
+}
 
-    let context_attributes = ContextAttributesBuilder::new().build(Some(raw_window_handle));
+// Note: we use the Y=up coordinate space in this example.
+struct Camera {
+    screen_size: (u32, u32),
+    angle_y: f32,
+    angle_xz: f32,
+    dist: f32,
+}
 
-    let fallback_context_attributes = ContextAttributesBuilder::new()
-        .with_context_api(ContextApi::Gles(None))
-        .build(Some(raw_window_handle));
-    let mut maybe_gl_context = Some(unsafe {
-        gl_display
-            .create_context(&gl_config, &context_attributes)
-            .unwrap_or_else(|_| {
-                gl_display
-                    .create_context(&gl_config, &fallback_context_attributes)
-                    .expect("failed to create context")
-            })
-    });
+const MODEL_CENTER_Y: f32 = 2.0;
 
-    let gl_window = GlWindow::new(window, &gl_config);
-
-    let gl_context = maybe_gl_context
-        .take()
-        .unwrap()
-        .make_current(&gl_window.surface)
-        .unwrap();
-
-    gl::load_with(|symbol| {
-        let symbol = CString::new(symbol).unwrap();
-        gl_display.get_proc_address(symbol.as_c_str()).cast()
-    });
-
-    // Create GLSL shaders
-    let vs = compile_shader(VS_SRC, gl::VERTEX_SHADER);
-    let fs = compile_shader(FS_SRC, gl::FRAGMENT_SHADER);
-    let program = link_program(vs, fs);
-
-    let mut vao = 0;
-    let mut vbo = 0;
-
-    unsafe {
-        // Create Vertex Array Object
-        gl::GenVertexArrays(1, &mut vao);
-        gl::BindVertexArray(vao);
-
-        // Create a Vertex Buffer Object and copy the vertex data to it
-        gl::GenBuffers(1, &mut vbo);
-        gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
-        gl::BufferData(
-            gl::ARRAY_BUFFER,
-            (VERTEX_DATA.len() * mem::size_of::<GLfloat>()) as GLsizeiptr,
-            mem::transmute(&VERTEX_DATA[0]),
-            gl::STATIC_DRAW,
+impl Camera {
+    fn to_uniform_data(&self) -> [f32; 16 * 3 + 4] {
+        let aspect = self.screen_size.0 as f32 / self.screen_size.1 as f32;
+        let proj = glam::Mat4::perspective_rh(consts::FRAC_PI_4, aspect, 1.0, 50.0);
+        let cam_pos = glam::Vec3::new(
+            self.angle_xz.cos() * self.angle_y.sin() * self.dist,
+            self.angle_xz.sin() * self.dist + MODEL_CENTER_Y,
+            self.angle_xz.cos() * self.angle_y.cos() * self.dist,
         );
-
-        // Use shader program
-        gl::UseProgram(program);
-        gl::BindFragDataLocation(program, 0, CString::new("out_color").unwrap().as_ptr());
-
-        // Specify the layout of the vertex data
-        let pos_attr = gl::GetAttribLocation(program, CString::new("position").unwrap().as_ptr());
-        gl::EnableVertexAttribArray(pos_attr as GLuint);
-        gl::VertexAttribPointer(
-            pos_attr as GLuint,
-            2,
-            gl::FLOAT,
-            gl::FALSE as GLboolean,
-            0,
-            ptr::null(),
+        let view = glam::Mat4::look_at_rh(
+            cam_pos,
+            glam::Vec3::new(0f32, MODEL_CENTER_Y, 0.0),
+            glam::Vec3::Y,
         );
+        let proj_inv = proj.inverse();
+
+        let mut raw = [0f32; 16 * 3 + 4];
+        raw[..16].copy_from_slice(&AsRef::<[f32; 16]>::as_ref(&proj)[..]);
+        raw[16..32].copy_from_slice(&AsRef::<[f32; 16]>::as_ref(&proj_inv)[..]);
+        raw[32..48].copy_from_slice(&AsRef::<[f32; 16]>::as_ref(&view)[..]);
+        raw[48..51].copy_from_slice(AsRef::<[f32; 3]>::as_ref(&cam_pos));
+        raw[51] = 1.0;
+        raw
+    }
+}
+
+pub struct DragonsApp {
+    camera: Camera,
+    sky_pipeline: wgpu::RenderPipeline,
+    entity_pipeline: wgpu::RenderPipeline,
+    bind_group: wgpu::BindGroup,
+    uniform_buf: wgpu::Buffer,
+    entities: Vec<Entity>,
+    depth_view: wgpu::TextureView,
+    staging_belt: wgpu::util::StagingBelt,
+}
+
+impl DragonsApp {
+    const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
+
+    fn create_depth_texture(
+        config: &wgpu::SurfaceConfiguration,
+        device: &wgpu::Device,
+    ) -> wgpu::TextureView {
+        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+            size: wgpu::Extent3d {
+                width: config.width,
+                height: config.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: Self::DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            label: None,
+        });
+
+        depth_texture.create_view(&wgpu::TextureViewDescriptor::default())
+    }
+}
+
+impl Example for DragonsApp {
+    fn optional_features() -> wgpu::Features {
+        wgpu::Features::TEXTURE_COMPRESSION_ASTC_LDR
+            | wgpu::Features::TEXTURE_COMPRESSION_ETC2
+            | wgpu::Features::TEXTURE_COMPRESSION_BC
     }
 
-    event_loop.run(move |event, _, control_flow| {
-        control_flow.set_wait();
-        match event {
-            Event::LoopDestroyed => return,
-            Event::DeviceEvent { event, .. } => match event {
-                winit::event::DeviceEvent::Key(KeyboardInput {
-                    virtual_keycode, ..
-                }) => {
-                    if let Some(virtual_keycode) = virtual_keycode {
-                        match virtual_keycode {
-                            VirtualKeyCode::Escape => control_flow.set_exit(),
-                            _ => (),
+    fn init(
+        config: &wgpu::SurfaceConfiguration,
+        _adapter: &wgpu::Adapter,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Self {
+        let mut entities = Vec::new();
+        {
+            let source = include_bytes!("../../resources/suzanne.obj");
+            let data = obj::ObjData::load_buf(&source[..]).unwrap();
+            let mut vertices = Vec::new();
+            for object in data.objects {
+                for group in object.groups {
+                    vertices.clear();
+                    for poly in group.polys {
+                        for end_index in 2..poly.0.len() {
+                            for &index in &[0, end_index - 1, end_index] {
+                                let obj::IndexTuple(position_id, _texture_id, normal_id) =
+                                    poly.0[index];
+                                vertices.push(Vertex {
+                                    pos: data.position[position_id],
+                                    normal: data.normal[normal_id.unwrap()],
+                                })
+                            }
                         }
                     }
+                    let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("Vertex"),
+                        contents: bytemuck::cast_slice(&vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+                    entities.push(Entity {
+                        vertex_count: vertices.len() as u32,
+                        vertex_buf,
+                    });
                 }
-                _ => (),
-            },
-            Event::WindowEvent { event, .. } => match event {
-                WindowEvent::CloseRequested => control_flow.set_exit(),
-                _ => (),
-            },
-            Event::RedrawEventsCleared => {
-                unsafe {
-                    // Clear the screen to black
-                    gl::ClearColor(0.3, 0.3, 0.3, 1.0);
-                    gl::Clear(gl::COLOR_BUFFER_BIT);
-                    // Draw a triangle from the 3 vertices
-                    gl::DrawArrays(gl::TRIANGLES, 0, 3);
-                }
-                gl_window.window.request_redraw();
-                gl_window.surface.swap_buffers(&gl_context).unwrap();
-            }
-            _ => (),
-        }
-
-        if control_flow == &ControlFlow::Exit {
-            // Cleanup
-            unsafe {
-                gl::DeleteProgram(program);
-                gl::DeleteShader(fs);
-                gl::DeleteShader(vs);
-                gl::DeleteBuffers(1, &vbo);
-                gl::DeleteVertexArrays(1, &vao);
             }
         }
-    });
-}
 
-pub struct GlWindow {
-    // XXX the surface must be dropped before the window.
-    pub surface: Surface<WindowSurface>,
-    pub window: Window,
-}
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::Cube,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
 
-impl GlWindow {
-    pub fn new(window: Window, config: &Config) -> Self {
-        let (width, height): (u32, u32) = window.inner_size().into();
-        let raw_window_handle = window.raw_window_handle();
-        let attrs = SurfaceAttributesBuilder::<WindowSurface>::new().build(
-            raw_window_handle,
-            NonZeroU32::new(width).unwrap(),
-            NonZeroU32::new(height).unwrap(),
-        );
+        // Create the render pipeline
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: None,
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("shader.wgsl"))),
+        });
 
-        let surface = unsafe {
-            config
-                .display()
-                .create_window_surface(config, &attrs)
-                .unwrap()
+        let camera = Camera {
+            screen_size: (config.width, config.height),
+            angle_xz: 0.2,
+            angle_y: 0.2,
+            dist: 20.0,
+        };
+        let raw_uniforms = camera.to_uniform_data();
+        let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Buffer"),
+            contents: bytemuck::cast_slice(&raw_uniforms),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None,
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        // Create the render pipelines
+        let sky_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Sky"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_sky",
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_sky",
+                targets: &[Some(config.format.into())],
+            }),
+            primitive: wgpu::PrimitiveState {
+                front_face: wgpu::FrontFace::Cw,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: Self::DEPTH_FORMAT,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        });
+        let entity_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Entity"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_entity",
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
+                }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_entity",
+                targets: &[Some(config.format.into())],
+            }),
+            primitive: wgpu::PrimitiveState {
+                front_face: wgpu::FrontFace::Cw,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: Self::DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        });
+
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: None,
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
+        let device_features = device.features();
+
+        let skybox_format =
+            if device_features.contains(wgpu::Features::TEXTURE_COMPRESSION_ASTC_LDR) {
+                log::info!("Using ASTC_LDR");
+                wgpu::TextureFormat::Astc {
+                    block: AstcBlock::B4x4,
+                    channel: AstcChannel::UnormSrgb,
+                }
+            } else if device_features.contains(wgpu::Features::TEXTURE_COMPRESSION_ETC2) {
+                log::info!("Using ETC2");
+                wgpu::TextureFormat::Etc2Rgb8UnormSrgb
+            } else if device_features.contains(wgpu::Features::TEXTURE_COMPRESSION_BC) {
+                log::info!("Using BC");
+                wgpu::TextureFormat::Bc1RgbaUnormSrgb
+            } else {
+                log::info!("Using plain");
+                wgpu::TextureFormat::Bgra8UnormSrgb
+            };
+
+        let size = wgpu::Extent3d {
+            width: IMAGE_SIZE,
+            height: IMAGE_SIZE,
+            depth_or_array_layers: 6,
         };
 
-        Self { window, surface }
+        let layer_size = wgpu::Extent3d {
+            depth_or_array_layers: 1,
+            ..size
+        };
+        let max_mips = layer_size.max_mips(wgpu::TextureDimension::D2);
+
+        log::debug!(
+            "Copying {:?} skybox images of size {}, {}, 6 with {} mips to gpu",
+            skybox_format,
+            IMAGE_SIZE,
+            IMAGE_SIZE,
+            max_mips,
+        );
+
+        let bytes = match skybox_format {
+            wgpu::TextureFormat::Astc {
+                block: AstcBlock::B4x4,
+                channel: AstcChannel::UnormSrgb,
+            } => &include_bytes!("images/astc.dds")[..],
+            wgpu::TextureFormat::Etc2Rgb8UnormSrgb => &include_bytes!("images/etc2.dds")[..],
+            wgpu::TextureFormat::Bc1RgbaUnormSrgb => &include_bytes!("images/bc1.dds")[..],
+            wgpu::TextureFormat::Bgra8UnormSrgb => &include_bytes!("images/bgra.dds")[..],
+            _ => unreachable!(),
+        };
+
+        let image = ddsfile::Dds::read(&mut std::io::Cursor::new(&bytes)).unwrap();
+
+        let texture = device.create_texture_with_data(
+            queue,
+            &wgpu::TextureDescriptor {
+                size,
+                mip_level_count: max_mips as u32,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: skybox_format,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                label: None,
+            },
+            &image.data,
+        );
+
+        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor {
+            label: None,
+            dimension: Some(wgpu::TextureViewDimension::Cube),
+            ..wgpu::TextureViewDescriptor::default()
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+            label: None,
+        });
+
+        let depth_view = Self::create_depth_texture(config, device);
+
+        DragonsApp {
+            camera,
+            sky_pipeline,
+            entity_pipeline,
+            bind_group,
+            uniform_buf,
+            entities,
+            depth_view,
+            staging_belt: wgpu::util::StagingBelt::new(0x100),
+        }
+    }
+
+    #[allow(clippy::single_match)]
+    fn update(&mut self, event: winit::event::WindowEvent) {
+        match event {
+            winit::event::WindowEvent::CursorMoved { position, .. } => {
+                let norm_x = position.x as f32 / self.camera.screen_size.0 as f32 - 0.5;
+                let norm_y = position.y as f32 / self.camera.screen_size.1 as f32 - 0.5;
+                self.camera.angle_y = norm_x * 5.0;
+                self.camera.angle_xz = norm_y;
+            }
+            _ => {}
+        }
+    }
+
+    fn resize(
+        &mut self,
+        config: &wgpu::SurfaceConfiguration,
+        device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+    ) {
+        self.depth_view = Self::create_depth_texture(config, device);
+        self.camera.screen_size = (config.width, config.height);
+    }
+
+    fn render(
+        &mut self,
+        view: &wgpu::TextureView,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        _spawner: &Spawner,
+    ) {
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
+        // update rotation
+        let raw_uniforms = self.camera.to_uniform_data();
+        self.staging_belt
+            .write_buffer(
+                &mut encoder,
+                &self.uniform_buf,
+                0,
+                wgpu::BufferSize::new((raw_uniforms.len() * 4) as wgpu::BufferAddress).unwrap(),
+                device,
+            )
+            .copy_from_slice(bytemuck::cast_slice(&raw_uniforms));
+
+        self.staging_belt.finish();
+
+        {
+            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.1,
+                            g: 0.2,
+                            b: 0.3,
+                            a: 1.0,
+                        }),
+                        store: true,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: false,
+                    }),
+                    stencil_ops: None,
+                }),
+            });
+
+            rpass.set_bind_group(0, &self.bind_group, &[]);
+            rpass.set_pipeline(&self.entity_pipeline);
+
+            for entity in self.entities.iter() {
+                rpass.set_vertex_buffer(0, entity.vertex_buf.slice(..));
+                rpass.draw(0..entity.vertex_count, 0..1);
+            }
+
+            rpass.set_pipeline(&self.sky_pipeline);
+            rpass.draw(0..3, 0..1);
+        }
+
+        queue.submit(std::iter::once(encoder.finish()));
+
+        self.staging_belt.recall();
     }
 }
