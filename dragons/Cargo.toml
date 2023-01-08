@@ -22,10 +22,6 @@ tobj = "3"
 wgpu = "0.14"
 winit = "0.27"
 
-# TODO: temporary dependencies
-obj = "0.10"
-ddsfile = "0.5"
-
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wgpu = { version = "0.14", features = ["webgl"] }
 
