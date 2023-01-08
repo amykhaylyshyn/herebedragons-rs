@@ -11,9 +11,9 @@ async-executor = "1"
 bytemuck = { version = "1", features = ["derive"] }
 dotenv = "0.15"
 env_logger = "0.10"
+glam = "0.22"
 image = { version = "0.24", default-features = false, features = ["png"] }
 log = "0.4"
-nalgebra = "0.31"
 raw-window-handle = "0.5"
 ron = "0.8"
 serde = { version = "1", features = ["derive"] }
@@ -23,7 +23,6 @@ wgpu = "0.14"
 winit = "0.27"
 
 # TODO: temporary dependencies
-glam = "0.22"
 obj = "0.10"
 ddsfile = "0.5"
 
