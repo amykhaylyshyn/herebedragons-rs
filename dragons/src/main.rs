@@ -3,12 +3,12 @@ mod ecs;
 mod scene;
 
 use core::fmt;
-use std::{collections::HashMap, fs, path::Path};
+use std::{borrow::Cow, collections::HashMap, fs, path::Path};
 
 use anyhow::Result;
 use app::{Example, Spawner};
 use bytemuck::{Pod, Zeroable};
-use ecs::{Camera, MeshRef, Transform};
+use ecs::{MeshRef, Transform};
 use hecs::{Entity, World};
 use scene::Scene;
 use wgpu::util::DeviceExt;
@@ -18,12 +18,23 @@ fn main() -> Result<()> {
     app::run::<DragonsApp>("Dragons")
 }
 
+pub struct Camera {
+    pub projection: glam::Mat4,
+    pub view: glam::Mat4,
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Zeroable, Pod)]
 pub struct Vertex {
     position: [f32; 3],
     normal: [f32; 3],
     tex_coord: [f32; 2],
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Zeroable, Pod)]
+pub struct ShaderData {
+    model_view_proj: [f32; 16],
 }
 
 #[derive(Debug)]
@@ -70,10 +81,13 @@ pub struct RendererState {
 
 pub struct DragonsApp {
     world: World,
-    renderer_state: RendererState,
+    resources: ResourceManager,
+    camera: Camera,
     depth_view: wgpu::TextureView,
     staging_belt: wgpu::util::StagingBelt,
-    resources: ResourceManager,
+    bind_group: wgpu::BindGroup,
+    uniform_buf: wgpu::Buffer,
+    entity_pipeline: wgpu::RenderPipeline,
 }
 
 impl DragonsApp {
@@ -180,30 +194,114 @@ impl Example for DragonsApp {
                 }
             };
 
-            let transform = instance
-                .offset
-                .map(|offset| {
-                    let mut transform = Transform::default();
-                    transform.position = offset.into();
-                    transform
-                })
-                .unwrap_or_default();
+            let mut transform = Transform::default();
+            if let Some(offset) = instance.offset {
+                transform.position = offset.into();
+            }
+            if let Some(scale) = instance.scale {
+                transform.scale = glam::Vec3::new(scale, scale, scale);
+            }
+
             world.spawn((transform, mesh_ref));
         }
 
-        let camera_entity = world.spawn((Transform::default(), Camera::default()));
-        let renderer_state = RendererState {
-            active_camera: camera_entity,
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+
+        let shader_wgsl = fs::read_to_string("resources/shaders/shader.wgsl")?;
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: None,
+            source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader_wgsl)),
+        });
+
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None,
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let entity_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Entity"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_entity",
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
+                }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_entity",
+                targets: &[Some(config.format.into())],
+            }),
+            primitive: wgpu::PrimitiveState {
+                front_face: wgpu::FrontFace::Cw,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: Self::DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        });
+
+        let aspect = config.width as f32 / config.height as f32;
+        let proj = glam::Mat4::perspective_rh(std::f32::consts::FRAC_PI_4, aspect, 1.0, 50.0);
+        let cam_pos = glam::Vec3::new(0.0, 1.0, 5.0);
+        let view = glam::Mat4::look_at_rh(cam_pos, glam::Vec3::new(0.0, 0.0, 0.0), glam::Vec3::Y);
+        let model_view_proj = proj * view;
+        let shader_data = ShaderData {
+            model_view_proj: model_view_proj.to_cols_array(),
         };
+        let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Buffer"),
+            contents: bytemuck::cast_slice(&[shader_data]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buf.as_entire_binding(),
+            }],
+            label: None,
+        });
 
         let depth_view = Self::create_depth_texture(config, &device);
 
+        let camera = Camera {
+            projection: proj,
+            view,
+        };
+
         Ok(Self {
             world,
-            renderer_state,
             depth_view,
             staging_belt: wgpu::util::StagingBelt::new(0x100),
             resources,
+            entity_pipeline,
+            bind_group,
+            uniform_buf,
+            camera,
         })
     }
 
@@ -216,6 +314,9 @@ impl Example for DragonsApp {
         _queue: &wgpu::Queue,
     ) {
         self.depth_view = Self::create_depth_texture(config, device);
+        let aspect = config.width as f32 / config.height as f32;
+        self.camera.projection =
+            glam::Mat4::perspective_rh(std::f32::consts::FRAC_PI_4, aspect, 1.0, 50.0);
     }
 
     fn render(
@@ -227,8 +328,9 @@ impl Example for DragonsApp {
     ) {
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
         {
-            let _rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view,
@@ -252,6 +354,26 @@ impl Example for DragonsApp {
                     stencil_ops: None,
                 }),
             });
+
+            rpass.set_bind_group(0, &self.bind_group, &[]);
+            rpass.set_pipeline(&self.entity_pipeline);
+
+            for (_id, (transform, mesh_ref)) in self.world.query_mut::<(&Transform, &MeshRef)>() {
+                let model_view_proj =
+                    self.camera.projection * self.camera.view * transform.matrix();
+                let shader_data = ShaderData {
+                    model_view_proj: model_view_proj.to_cols_array(),
+                };
+
+                queue.write_buffer(&self.uniform_buf, 0, bytemuck::cast_slice(&[shader_data]));
+
+                let mesh_resources = self.resources.get_mesh(mesh_ref.mesh_resource_id);
+                for mesh_res in mesh_resources {
+                    rpass.set_index_buffer(mesh_res.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    rpass.set_vertex_buffer(0, mesh_res.vertices.slice(..));
+                    rpass.draw_indexed(0..mesh_res.index_count as u32, 0, 0..1);
+                }
+            }
         }
 
         queue.submit(std::iter::once(encoder.finish()));

@@ -16,6 +16,7 @@ pub struct Object {
 pub struct Instance {
     pub object: String,
     pub offset: Option<(f32, f32, f32)>,
+    pub scale: Option<f32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

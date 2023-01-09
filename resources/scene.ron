@@ -41,8 +41,10 @@ Scene (
     ), (
         object: "plane",
         offset: Some((0.0, -0.35, -0.5)),
+        scale: Some(2.0),
     ), (
         object: "dragon",
         offset: Some((-0.1, -0.05, -0.25)),
+        scale: Some(0.5),
     )]
 )
