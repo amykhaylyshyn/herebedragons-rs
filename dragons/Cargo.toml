@@ -12,6 +12,7 @@ bytemuck = { version = "1", features = ["derive"] }
 dotenv = "0.15"
 env_logger = "0.10"
 glam = "0.22"
+hecs = "0.9"
 image = { version = "0.24", default-features = false, features = ["png"] }
 log = "0.4"
 raw-window-handle = "0.5"

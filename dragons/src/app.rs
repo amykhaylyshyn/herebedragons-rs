@@ -1,3 +1,4 @@
+use anyhow::Result;
 use std::future::Future;
 #[cfg(target_arch = "wasm32")]
 use std::str::FromStr;
@@ -46,7 +47,7 @@ pub trait Example: 'static + Sized {
         adapter: &wgpu::Adapter,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-    ) -> Self;
+    ) -> Result<Self>;
     fn resize(
         &mut self,
         config: &wgpu::SurfaceConfiguration,
@@ -261,7 +262,7 @@ fn start<E: Example>(
         queue,
         offscreen_canvas_setup,
     }: Setup,
-) {
+) -> Result<()> {
     let spawner = Spawner::new();
     let mut config = wgpu::SurfaceConfiguration {
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -274,7 +275,7 @@ fn start<E: Example>(
     surface.configure(&device, &config);
 
     log::info!("Initializing the example...");
-    let mut example = E::init(&config, &adapter, &device, &queue);
+    let mut example = E::init(&config, &adapter, &device, &queue)?;
 
     #[cfg(not(target_arch = "wasm32"))]
     let mut last_frame_inst = Instant::now();
@@ -432,9 +433,9 @@ impl Spawner {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn run<E: Example>(title: &str) {
+pub fn run<E: Example>(title: &str) -> Result<()> {
     let setup = pollster::block_on(setup::<E>(title));
-    start::<E>(setup);
+    start::<E>(setup)
 }
 
 #[cfg(target_arch = "wasm32")]
