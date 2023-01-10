@@ -3,12 +3,12 @@ mod ecs;
 mod scene;
 
 use core::fmt;
-use std::{borrow::Cow, collections::HashMap, fs, path::Path};
+use std::{borrow::Cow, collections::HashMap, fs, mem::size_of, path::Path};
 
 use anyhow::Result;
 use app::{Example, Spawner};
 use bytemuck::{Pod, Zeroable};
-use ecs::{MeshRef, Transform};
+use ecs::{MeshRef, ShaderDataBindings, Transform};
 use hecs::{Entity, World};
 use scene::Scene;
 use wgpu::util::DeviceExt;
@@ -85,8 +85,6 @@ pub struct DragonsApp {
     camera: Camera,
     depth_view: wgpu::TextureView,
     staging_belt: wgpu::util::StagingBelt,
-    bind_group: wgpu::BindGroup,
-    uniform_buf: wgpu::Buffer,
     entity_pipeline: wgpu::RenderPipeline,
 }
 
@@ -126,6 +124,20 @@ impl Example for DragonsApp {
         let mut world = World::default();
         let scene_ron = fs::read_to_string("resources/scene.ron")?;
         let scene: Scene = ron::from_str(&scene_ron)?;
+
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
 
         let mut mesh_map: HashMap<String, usize> = HashMap::default();
         for instance in scene.instances.iter() {
@@ -202,22 +214,31 @@ impl Example for DragonsApp {
                 transform.scale = glam::Vec3::new(scale, scale, scale);
             }
 
-            world.spawn((transform, mesh_ref));
-        }
+            let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Instance"),
+                size: size_of::<ShaderData>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
 
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                layout: &bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                }],
+                label: None,
+            });
+
+            world.spawn((
+                transform,
+                mesh_ref,
+                ShaderDataBindings {
+                    buffer: uniform_buffer,
+                    bind_group,
                 },
-                count: None,
-            }],
-        });
+            ));
+        }
 
         let shader_wgsl = fs::read_to_string("resources/shaders/shader.wgsl")?;
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -265,26 +286,8 @@ impl Example for DragonsApp {
 
         let aspect = config.width as f32 / config.height as f32;
         let proj = glam::Mat4::perspective_rh(std::f32::consts::FRAC_PI_4, aspect, 1.0, 50.0);
-        let cam_pos = glam::Vec3::new(0.0, 1.0, 5.0);
+        let cam_pos = glam::Vec3::new(3.0, 1.0, -5.0);
         let view = glam::Mat4::look_at_rh(cam_pos, glam::Vec3::new(0.0, 0.0, 0.0), glam::Vec3::Y);
-        let model_view_proj = proj * view;
-        let shader_data = ShaderData {
-            model_view_proj: model_view_proj.to_cols_array(),
-        };
-        let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Buffer"),
-            contents: bytemuck::cast_slice(&[shader_data]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buf.as_entire_binding(),
-            }],
-            label: None,
-        });
 
         let depth_view = Self::create_depth_texture(config, &device);
 
@@ -299,8 +302,6 @@ impl Example for DragonsApp {
             staging_belt: wgpu::util::StagingBelt::new(0x100),
             resources,
             entity_pipeline,
-            bind_group,
-            uniform_buf,
             camera,
         })
     }
@@ -355,17 +356,24 @@ impl Example for DragonsApp {
                 }),
             });
 
-            rpass.set_bind_group(0, &self.bind_group, &[]);
             rpass.set_pipeline(&self.entity_pipeline);
 
-            for (_id, (transform, mesh_ref)) in self.world.query_mut::<(&Transform, &MeshRef)>() {
+            for (_id, (transform, mesh_ref, shader_data_bindings)) in
+                self.world
+                    .query_mut::<(&Transform, &MeshRef, &ShaderDataBindings)>()
+            {
                 let model_view_proj =
                     self.camera.projection * self.camera.view * transform.matrix();
                 let shader_data = ShaderData {
                     model_view_proj: model_view_proj.to_cols_array(),
                 };
 
-                queue.write_buffer(&self.uniform_buf, 0, bytemuck::cast_slice(&[shader_data]));
+                queue.write_buffer(
+                    &shader_data_bindings.buffer,
+                    0,
+                    bytemuck::cast_slice(&[shader_data]),
+                );
+                rpass.set_bind_group(0, &shader_data_bindings.bind_group, &[]);
 
                 let mesh_resources = self.resources.get_mesh(mesh_ref.mesh_resource_id);
                 for mesh_res in mesh_resources {

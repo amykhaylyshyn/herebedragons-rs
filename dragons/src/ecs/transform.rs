@@ -19,8 +19,8 @@ impl Default for Transform {
 
 impl Transform {
     pub fn matrix(&self) -> glam::Mat4 {
-        glam::Mat4::from_translation(self.position)
-            * glam::Mat4::from_scale(self.scale)
+        glam::Mat4::from_scale(self.scale)
             * glam::Mat4::from_quat(self.rotation)
+            * glam::Mat4::from_translation(self.position)
     }
 }
