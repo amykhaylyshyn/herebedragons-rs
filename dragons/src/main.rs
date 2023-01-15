@@ -3,7 +3,14 @@ mod ecs;
 mod scene;
 
 use core::fmt;
-use std::{borrow::Cow, collections::HashMap, fs, mem::size_of, path::Path};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    f32::consts::E,
+    fs,
+    mem::size_of,
+    path::Path,
+};
 
 use anyhow::Result;
 use app::{Example, Spawner};
@@ -12,6 +19,7 @@ use ecs::{MeshRef, ShaderDataBindings, Transform};
 use hecs::{Entity, World};
 use scene::Scene;
 use wgpu::util::DeviceExt;
+use winit::event::{ElementState, VirtualKeyCode};
 
 fn main() -> Result<()> {
     dotenv::dotenv().ok();
@@ -86,6 +94,7 @@ pub struct DragonsApp {
     depth_view: wgpu::TextureView,
     staging_belt: wgpu::util::StagingBelt,
     entity_pipeline: wgpu::RenderPipeline,
+    pressed_keys: HashSet<VirtualKeyCode>,
 }
 
 impl DragonsApp {
@@ -303,10 +312,28 @@ impl Example for DragonsApp {
             resources,
             entity_pipeline,
             camera,
+            pressed_keys: HashSet::new(),
         })
     }
 
-    fn update(&mut self, _event: winit::event::WindowEvent) {}
+    fn update(&mut self, event: winit::event::WindowEvent) {
+        match event {
+            winit::event::WindowEvent::KeyboardInput { input, .. } => {
+                if let Some(virtual_key_code) = input.virtual_keycode {
+                    if input.state == ElementState::Pressed {
+                        if self.pressed_keys.insert(virtual_key_code) {
+                            log::info!("Pressed key: {:?}", virtual_key_code);
+                        }
+                    } else {
+                        if self.pressed_keys.remove(&virtual_key_code) {
+                            log::info!("Released key: {:?}", virtual_key_code);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
 
     fn resize(
         &mut self,
