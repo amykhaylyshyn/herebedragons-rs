@@ -1,4 +1,4 @@
-use glam::{Quat, Vec3};
+use glam::{Mat4, Quat, Vec3};
 
 #[derive(Debug, Clone)]
 pub struct Transform {
@@ -18,9 +18,21 @@ impl Default for Transform {
 }
 
 impl Transform {
-    pub fn matrix(&self) -> glam::Mat4 {
-        glam::Mat4::from_scale(self.scale)
-            * glam::Mat4::from_quat(self.rotation)
-            * glam::Mat4::from_translation(self.position)
+    pub fn matrix(&self) -> Mat4 {
+        Mat4::from_scale(self.scale)
+            * Mat4::from_quat(self.rotation)
+            * Mat4::from_translation(self.position)
+    }
+
+    pub fn forward(&self) -> Vec3 {
+        self.rotation.mul_vec3(Vec3::new(0.0, 0.0, 1.0))
+    }
+
+    pub fn right(&self) -> Vec3 {
+        self.rotation.mul_vec3(Vec3::new(1.0, 0.0, 0.0))
+    }
+
+    pub fn up(&self) -> Vec3 {
+        self.rotation.mul_vec3(Vec3::new(0.0, 1.0, 0.0))
     }
 }

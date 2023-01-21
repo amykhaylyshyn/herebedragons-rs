@@ -15,7 +15,8 @@ use std::{
 use anyhow::Result;
 use app::{Example, Spawner};
 use bytemuck::{Pod, Zeroable};
-use ecs::{MeshRef, ShaderDataBindings, Transform};
+use ecs::{Camera, MeshRef, ShaderDataBindings, Transform};
+use glam::{Mat4, Quat, Vec3};
 use hecs::{Entity, World};
 use scene::Scene;
 use wgpu::util::DeviceExt;
@@ -24,11 +25,6 @@ use winit::event::{ElementState, VirtualKeyCode};
 fn main() -> Result<()> {
     dotenv::dotenv().ok();
     app::run::<DragonsApp>("Dragons")
-}
-
-pub struct Camera {
-    pub projection: glam::Mat4,
-    pub view: glam::Mat4,
 }
 
 #[repr(C)]
@@ -90,11 +86,12 @@ pub struct RendererState {
 pub struct DragonsApp {
     world: World,
     resources: ResourceManager,
-    camera: Camera,
     depth_view: wgpu::TextureView,
     staging_belt: wgpu::util::StagingBelt,
     entity_pipeline: wgpu::RenderPipeline,
     pressed_keys: HashSet<VirtualKeyCode>,
+    camera_entity: Entity,
+    view_aspect_ratio: f32,
 }
 
 impl DragonsApp {
@@ -293,17 +290,14 @@ impl Example for DragonsApp {
             multiview: None,
         });
 
-        let aspect = config.width as f32 / config.height as f32;
-        let proj = glam::Mat4::perspective_rh(std::f32::consts::FRAC_PI_4, aspect, 1.0, 50.0);
-        let cam_pos = glam::Vec3::new(3.0, 1.0, -5.0);
-        let view = glam::Mat4::look_at_rh(cam_pos, glam::Vec3::new(0.0, 0.0, 0.0), glam::Vec3::Y);
+        let camera_entity = {
+            let camera = Camera::default();
+            let mut camera_transform = Transform::default();
+            camera_transform.position = Vec3::new(3.0, 1.0, -5.0);
+            world.spawn((camera, camera_transform))
+        };
 
         let depth_view = Self::create_depth_texture(config, &device);
-
-        let camera = Camera {
-            projection: proj,
-            view,
-        };
 
         Ok(Self {
             world,
@@ -311,8 +305,9 @@ impl Example for DragonsApp {
             staging_belt: wgpu::util::StagingBelt::new(0x100),
             resources,
             entity_pipeline,
-            camera,
             pressed_keys: HashSet::new(),
+            camera_entity,
+            view_aspect_ratio: 1.0,
         })
     }
 
@@ -343,8 +338,7 @@ impl Example for DragonsApp {
     ) {
         self.depth_view = Self::create_depth_texture(config, device);
         let aspect = config.width as f32 / config.height as f32;
-        self.camera.projection =
-            glam::Mat4::perspective_rh(std::f32::consts::FRAC_PI_4, aspect, 1.0, 50.0);
+        self.view_aspect_ratio = aspect;
     }
 
     fn render(
@@ -353,7 +347,22 @@ impl Example for DragonsApp {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         _spawner: &Spawner,
-    ) {
+    ) -> Result<()> {
+        let (camera, camera_transform) = self
+            .world
+            .query_one_mut::<(&Camera, &Transform)>(self.camera_entity)?;
+        let proj_matrix = Mat4::perspective_rh(
+            camera.fov_y,
+            self.view_aspect_ratio,
+            camera.z_near,
+            camera.z_far,
+        );
+        let view_matrix = Mat4::look_at_rh(
+            camera_transform.position,
+            camera_transform.position + camera_transform.forward(),
+            camera_transform.up(),
+        );
+
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
@@ -389,8 +398,7 @@ impl Example for DragonsApp {
                 self.world
                     .query_mut::<(&Transform, &MeshRef, &ShaderDataBindings)>()
             {
-                let model_view_proj =
-                    self.camera.projection * self.camera.view * transform.matrix();
+                let model_view_proj = proj_matrix * view_matrix * transform.matrix();
                 let shader_data = ShaderData {
                     model_view_proj: model_view_proj.to_cols_array(),
                 };
@@ -414,5 +422,6 @@ impl Example for DragonsApp {
         queue.submit(std::iter::once(encoder.finish()));
 
         self.staging_belt.recall();
+        Ok(())
     }
 }

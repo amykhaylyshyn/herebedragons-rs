@@ -61,7 +61,7 @@ pub trait Example: 'static + Sized {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         spawner: &Spawner,
-    );
+    ) -> Result<()>;
 }
 
 struct Setup {
@@ -370,7 +370,9 @@ fn start<E: Example>(
                     .texture
                     .create_view(&wgpu::TextureViewDescriptor::default());
 
-                example.render(&view, &device, &queue, &spawner);
+                if let Err(err) = example.render(&view, &device, &queue, &spawner) {
+                    log::error!("Render error: {}", err);
+                }
 
                 frame.present();
 
