@@ -6,7 +6,6 @@ use core::fmt;
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
-    f32::consts::E,
     fs,
     mem::size_of,
     path::Path,
@@ -16,7 +15,7 @@ use anyhow::Result;
 use app::{Example, Spawner};
 use bytemuck::{Pod, Zeroable};
 use ecs::{Camera, MeshRef, ShaderDataBindings, Transform};
-use glam::{Mat4, Quat, Vec3};
+use glam::{Mat4, Vec3};
 use hecs::{Entity, World};
 use scene::Scene;
 use wgpu::util::DeviceExt;
@@ -311,7 +310,7 @@ impl Example for DragonsApp {
         })
     }
 
-    fn update(&mut self, event: winit::event::WindowEvent) {
+    fn update(&mut self, event: winit::event::WindowEvent) -> Result<()> {
         match event {
             winit::event::WindowEvent::KeyboardInput { input, .. } => {
                 if let Some(virtual_key_code) = input.virtual_keycode {
@@ -328,6 +327,8 @@ impl Example for DragonsApp {
             }
             _ => {}
         }
+
+        Ok(())
     }
 
     fn resize(
@@ -350,7 +351,7 @@ impl Example for DragonsApp {
     ) -> Result<()> {
         let (camera, camera_transform) = self
             .world
-            .query_one_mut::<(&Camera, &Transform)>(self.camera_entity)?;
+            .query_one_mut::<(&Camera, &mut Transform)>(self.camera_entity)?;
         let proj_matrix = Mat4::perspective_rh(
             camera.fov_y,
             self.view_aspect_ratio,
@@ -362,6 +363,21 @@ impl Example for DragonsApp {
             camera_transform.position + camera_transform.forward(),
             camera_transform.up(),
         );
+
+        let mut movement = Vec3::default();
+        if self.pressed_keys.contains(&VirtualKeyCode::W) {
+            movement += camera_transform.forward() * 0.1;
+        }
+        if self.pressed_keys.contains(&VirtualKeyCode::S) {
+            movement -= camera_transform.forward() * 0.1;
+        }
+        if self.pressed_keys.contains(&VirtualKeyCode::D) {
+            movement -= camera_transform.left() * 0.1;
+        }
+        if self.pressed_keys.contains(&VirtualKeyCode::A) {
+            movement += camera_transform.left() * 0.1;
+        }
+        camera_transform.position += movement;
 
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });

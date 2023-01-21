@@ -28,7 +28,7 @@ impl Transform {
         self.rotation.mul_vec3(Vec3::new(0.0, 0.0, 1.0))
     }
 
-    pub fn right(&self) -> Vec3 {
+    pub fn left(&self) -> Vec3 {
         self.rotation.mul_vec3(Vec3::new(1.0, 0.0, 0.0))
     }
 

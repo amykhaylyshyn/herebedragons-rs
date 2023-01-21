@@ -54,7 +54,7 @@ pub trait Example: 'static + Sized {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     );
-    fn update(&mut self, event: WindowEvent);
+    fn update(&mut self, event: WindowEvent) -> Result<()>;
     fn render(
         &mut self,
         view: &wgpu::TextureView,
@@ -338,7 +338,9 @@ fn start<E: Example>(
                     println!("{:#?}", instance.generate_report());
                 }
                 _ => {
-                    example.update(event);
+                    if let Err(err) = example.update(event) {
+                        log::error!("Update error: {}", err);
+                    }
                 }
             },
             event::Event::RedrawRequested(_) => {
