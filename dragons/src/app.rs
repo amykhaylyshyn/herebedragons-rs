@@ -7,7 +7,7 @@ use std::time::Instant;
 #[cfg(target_arch = "wasm32")]
 use web_sys::{ImageBitmapRenderingContext, OffscreenCanvas};
 use winit::{
-    event::{self, WindowEvent},
+    event::{self, DeviceEvent, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
 };
 
@@ -54,7 +54,8 @@ pub trait Example: 'static + Sized {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     );
-    fn update(&mut self, event: WindowEvent) -> Result<()>;
+    fn window_event(&mut self, event: WindowEvent) -> Result<()>;
+    fn device_event(&mut self, device_id: event::DeviceId, event: DeviceEvent) -> Result<()>;
     fn render(
         &mut self,
         view: &wgpu::TextureView,
@@ -338,7 +339,7 @@ fn start<E: Example>(
                     println!("{:#?}", instance.generate_report());
                 }
                 _ => {
-                    if let Err(err) = example.update(event) {
+                    if let Err(err) = example.window_event(event) {
                         log::error!("Update error: {}", err);
                     }
                 }
@@ -391,6 +392,11 @@ fn start<E: Example>(
 
                         log::info!("Transferring OffscreenCanvas to ImageBitmapRenderer");
                     }
+                }
+            }
+            event::Event::DeviceEvent { device_id, event } => {
+                if let Err(err) = example.device_event(device_id, event) {
+                    log::warn!("Device event handling error: {}", err);
                 }
             }
             _ => {}

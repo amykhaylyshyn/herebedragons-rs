@@ -15,7 +15,7 @@ use anyhow::Result;
 use app::{Example, Spawner};
 use bytemuck::{Pod, Zeroable};
 use ecs::{Camera, MeshRef, ShaderDataBindings, Transform};
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Vec2, Vec3};
 use hecs::{Entity, World};
 use scene::Scene;
 use wgpu::util::DeviceExt;
@@ -91,6 +91,7 @@ pub struct DragonsApp {
     pressed_keys: HashSet<VirtualKeyCode>,
     camera_entity: Entity,
     view_aspect_ratio: f32,
+    mouse_move_delta: Vec2,
 }
 
 impl DragonsApp {
@@ -307,10 +308,11 @@ impl Example for DragonsApp {
             pressed_keys: HashSet::new(),
             camera_entity,
             view_aspect_ratio: 1.0,
+            mouse_move_delta: Default::default(),
         })
     }
 
-    fn update(&mut self, event: winit::event::WindowEvent) -> Result<()> {
+    fn window_event(&mut self, event: winit::event::WindowEvent) -> Result<()> {
         match event {
             winit::event::WindowEvent::KeyboardInput { input, .. } => {
                 if let Some(virtual_key_code) = input.virtual_keycode {
@@ -328,6 +330,20 @@ impl Example for DragonsApp {
             _ => {}
         }
 
+        Ok(())
+    }
+
+    fn device_event(
+        &mut self,
+        _device_id: winit::event::DeviceId,
+        event: winit::event::DeviceEvent,
+    ) -> Result<()> {
+        match event {
+            winit::event::DeviceEvent::MouseMotion { delta } => {
+                self.mouse_move_delta = Vec2::new(delta.0 as f32, delta.1 as f32);
+            }
+            _ => {}
+        }
         Ok(())
     }
 
