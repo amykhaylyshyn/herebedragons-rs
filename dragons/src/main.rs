@@ -14,12 +14,12 @@ use std::{
 use anyhow::Result;
 use app::{Example, Spawner};
 use bytemuck::{Pod, Zeroable};
-use ecs::{Camera, MeshRef, ShaderDataBindings, Transform};
-use glam::{Mat4, Vec2, Vec3};
+use ecs::{Camera, MeshRef, Player, ShaderDataBindings, Transform};
+use glam::{EulerRot, Mat4, Quat, Vec2, Vec3};
 use hecs::{Entity, World};
 use scene::Scene;
 use wgpu::util::DeviceExt;
-use winit::event::{ElementState, VirtualKeyCode};
+use winit::event::{ElementState, MouseButton, VirtualKeyCode};
 
 fn main() -> Result<()> {
     dotenv::dotenv().ok();
@@ -89,6 +89,7 @@ pub struct DragonsApp {
     staging_belt: wgpu::util::StagingBelt,
     entity_pipeline: wgpu::RenderPipeline,
     pressed_keys: HashSet<VirtualKeyCode>,
+    pressed_mouse_buttons: HashSet<MouseButton>,
     camera_entity: Entity,
     view_aspect_ratio: f32,
     mouse_move_delta: Vec2,
@@ -116,6 +117,128 @@ impl DragonsApp {
         });
 
         depth_texture.create_view(&wgpu::TextureViewDescriptor::default())
+    }
+
+    fn camera_movement_system(&mut self) {
+        let query = self
+            .world
+            .query_mut::<(&Camera, &mut Transform, &mut Player)>();
+
+        for (_, (_, transform, player)) in query {
+            if self.pressed_mouse_buttons.contains(&MouseButton::Left) {
+                player.yaw -= self.mouse_move_delta.x * 0.01;
+                player.pitch += self.mouse_move_delta.y * 0.01;
+                player.pitch = player
+                    .pitch
+                    .clamp(-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2);
+            }
+
+            let forward = Quat::from_rotation_y(player.yaw).mul_vec3(Vec3::Z);
+
+            let mut movement = Vec3::default();
+            if self.pressed_keys.contains(&VirtualKeyCode::W) {
+                movement += forward * 0.1;
+            }
+            if self.pressed_keys.contains(&VirtualKeyCode::S) {
+                movement -= forward * 0.1;
+            }
+            if self.pressed_keys.contains(&VirtualKeyCode::D) {
+                movement -= transform.left() * 0.1;
+            }
+            if self.pressed_keys.contains(&VirtualKeyCode::A) {
+                movement += transform.left() * 0.1;
+            }
+            transform.position += movement;
+            transform.rotation = Quat::from_euler(EulerRot::YXZ, player.yaw, player.pitch, 0.0);
+        }
+    }
+
+    fn render_system(
+        &mut self,
+        view: &wgpu::TextureView,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<()> {
+        let (camera, camera_transform) = self
+            .world
+            .query_one_mut::<(&Camera, &mut Transform)>(self.camera_entity)?;
+        let proj_matrix = Mat4::perspective_rh(
+            camera.fov_y,
+            self.view_aspect_ratio,
+            camera.z_near,
+            camera.z_far,
+        );
+        let view_matrix = Mat4::look_at_rh(
+            camera_transform.position,
+            camera_transform.position + camera_transform.forward(),
+            camera_transform.up(),
+        );
+
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
+        {
+            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.1,
+                            g: 0.2,
+                            b: 0.3,
+                            a: 1.0,
+                        }),
+                        store: true,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: false,
+                    }),
+                    stencil_ops: None,
+                }),
+            });
+
+            rpass.set_pipeline(&self.entity_pipeline);
+
+            for (_id, (transform, mesh_ref, shader_data_bindings)) in
+                self.world
+                    .query_mut::<(&Transform, &MeshRef, &ShaderDataBindings)>()
+            {
+                let model_view_proj = proj_matrix * view_matrix * transform.matrix();
+                let shader_data = ShaderData {
+                    model_view_proj: model_view_proj.to_cols_array(),
+                };
+
+                queue.write_buffer(
+                    &shader_data_bindings.buffer,
+                    0,
+                    bytemuck::cast_slice(&[shader_data]),
+                );
+                rpass.set_bind_group(0, &shader_data_bindings.bind_group, &[]);
+
+                let mesh_resources = self.resources.get_mesh(mesh_ref.mesh_resource_id);
+                for mesh_res in mesh_resources {
+                    rpass.set_index_buffer(mesh_res.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    rpass.set_vertex_buffer(0, mesh_res.vertices.slice(..));
+                    rpass.draw_indexed(0..mesh_res.index_count as u32, 0, 0..1);
+                }
+            }
+        }
+
+        queue.submit(std::iter::once(encoder.finish()));
+        self.staging_belt.recall();
+
+        Ok(())
+    }
+
+    fn mouse_move_post_render_system(&mut self) {
+        // reset mouse movement delta
+        self.mouse_move_delta = Vec2::default();
     }
 }
 
@@ -294,7 +417,7 @@ impl Example for DragonsApp {
             let camera = Camera::default();
             let mut camera_transform = Transform::default();
             camera_transform.position = Vec3::new(3.0, 1.0, -5.0);
-            world.spawn((camera, camera_transform))
+            world.spawn((camera, camera_transform, Player::default()))
         };
 
         let depth_view = Self::create_depth_texture(config, &device);
@@ -306,6 +429,7 @@ impl Example for DragonsApp {
             resources,
             entity_pipeline,
             pressed_keys: HashSet::new(),
+            pressed_mouse_buttons: HashSet::new(),
             camera_entity,
             view_aspect_ratio: 1.0,
             mouse_move_delta: Default::default(),
@@ -318,12 +442,23 @@ impl Example for DragonsApp {
                 if let Some(virtual_key_code) = input.virtual_keycode {
                     if input.state == ElementState::Pressed {
                         if self.pressed_keys.insert(virtual_key_code) {
-                            log::info!("Pressed key: {:?}", virtual_key_code);
+                            log::info!("Pressed {:?}", virtual_key_code);
                         }
                     } else {
                         if self.pressed_keys.remove(&virtual_key_code) {
-                            log::info!("Released key: {:?}", virtual_key_code);
+                            log::info!("Released {:?}", virtual_key_code);
                         }
+                    }
+                }
+            }
+            winit::event::WindowEvent::MouseInput { state, button, .. } => {
+                if state == ElementState::Pressed {
+                    if self.pressed_mouse_buttons.insert(button) {
+                        log::info!("Mouse {:?} button pressed", button);
+                    }
+                } else {
+                    if self.pressed_mouse_buttons.remove(&button) {
+                        log::info!("Mouse {:?} button released", button);
                     }
                 }
             }
@@ -365,95 +500,9 @@ impl Example for DragonsApp {
         queue: &wgpu::Queue,
         _spawner: &Spawner,
     ) -> Result<()> {
-        let (camera, camera_transform) = self
-            .world
-            .query_one_mut::<(&Camera, &mut Transform)>(self.camera_entity)?;
-        let proj_matrix = Mat4::perspective_rh(
-            camera.fov_y,
-            self.view_aspect_ratio,
-            camera.z_near,
-            camera.z_far,
-        );
-        let view_matrix = Mat4::look_at_rh(
-            camera_transform.position,
-            camera_transform.position + camera_transform.forward(),
-            camera_transform.up(),
-        );
-
-        let mut movement = Vec3::default();
-        if self.pressed_keys.contains(&VirtualKeyCode::W) {
-            movement += camera_transform.forward() * 0.1;
-        }
-        if self.pressed_keys.contains(&VirtualKeyCode::S) {
-            movement -= camera_transform.forward() * 0.1;
-        }
-        if self.pressed_keys.contains(&VirtualKeyCode::D) {
-            movement -= camera_transform.left() * 0.1;
-        }
-        if self.pressed_keys.contains(&VirtualKeyCode::A) {
-            movement += camera_transform.left() * 0.1;
-        }
-        camera_transform.position += movement;
-
-        let mut encoder =
-            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
-        {
-            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: None,
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.2,
-                            b: 0.3,
-                            a: 1.0,
-                        }),
-                        store: true,
-                    },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth_view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: false,
-                    }),
-                    stencil_ops: None,
-                }),
-            });
-
-            rpass.set_pipeline(&self.entity_pipeline);
-
-            for (_id, (transform, mesh_ref, shader_data_bindings)) in
-                self.world
-                    .query_mut::<(&Transform, &MeshRef, &ShaderDataBindings)>()
-            {
-                let model_view_proj = proj_matrix * view_matrix * transform.matrix();
-                let shader_data = ShaderData {
-                    model_view_proj: model_view_proj.to_cols_array(),
-                };
-
-                queue.write_buffer(
-                    &shader_data_bindings.buffer,
-                    0,
-                    bytemuck::cast_slice(&[shader_data]),
-                );
-                rpass.set_bind_group(0, &shader_data_bindings.bind_group, &[]);
-
-                let mesh_resources = self.resources.get_mesh(mesh_ref.mesh_resource_id);
-                for mesh_res in mesh_resources {
-                    rpass.set_index_buffer(mesh_res.indices.slice(..), wgpu::IndexFormat::Uint32);
-                    rpass.set_vertex_buffer(0, mesh_res.vertices.slice(..));
-                    rpass.draw_indexed(0..mesh_res.index_count as u32, 0, 0..1);
-                }
-            }
-        }
-
-        queue.submit(std::iter::once(encoder.finish()));
-
-        self.staging_belt.recall();
+        self.camera_movement_system();
+        self.render_system(view, device, queue)?;
+        self.mouse_move_post_render_system();
         Ok(())
     }
 }

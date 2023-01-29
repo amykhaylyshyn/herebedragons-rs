@@ -25,14 +25,14 @@ impl Transform {
     }
 
     pub fn forward(&self) -> Vec3 {
-        self.rotation.mul_vec3(Vec3::new(0.0, 0.0, 1.0))
+        self.rotation.mul_vec3(Vec3::Z)
     }
 
     pub fn left(&self) -> Vec3 {
-        self.rotation.mul_vec3(Vec3::new(1.0, 0.0, 0.0))
+        self.rotation.mul_vec3(Vec3::X)
     }
 
     pub fn up(&self) -> Vec3 {
-        self.rotation.mul_vec3(Vec3::new(0.0, 1.0, 0.0))
+        self.rotation.mul_vec3(Vec3::Y)
     }
 }
