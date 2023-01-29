@@ -21,6 +21,14 @@ use scene::Scene;
 use wgpu::util::DeviceExt;
 use winit::event::{ElementState, MouseButton, VirtualKeyCode};
 
+// TODO: calculate update delta time
+// TODO: mouse sensitivity
+// TODO: implement back face culling
+// TODO: correct objects positions in scene
+// TODO: implement texture loading
+// TODO: implement skybox
+// TODO: g-buffers and deferred rendering
+
 fn main() -> Result<()> {
     dotenv::dotenv().ok();
     app::run::<DragonsApp>("Dragons")
