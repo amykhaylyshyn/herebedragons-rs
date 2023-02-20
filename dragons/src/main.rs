@@ -1,5 +1,7 @@
 mod app;
+mod clock;
 mod ecs;
+mod frame_counter;
 mod scene;
 
 use core::fmt;
@@ -14,7 +16,9 @@ use std::{
 use anyhow::Result;
 use app::{Example, Spawner};
 use bytemuck::{Pod, Zeroable};
+use clock::{Clock, InstantClock};
 use ecs::{Camera, MeshRef, Player, ShaderDataBindings, Transform};
+use frame_counter::FrameCounter;
 use glam::{EulerRot, Mat4, Quat, Vec2, Vec3};
 use hecs::{Entity, World};
 use scene::Scene;
@@ -29,9 +33,19 @@ use winit::event::{ElementState, MouseButton, VirtualKeyCode};
 // TODO: implement skybox
 // TODO: g-buffers and deferred rendering
 
+pub trait Dependencies: 'static {
+    type Clock: Clock;
+}
+
+struct AppDependencies {}
+
+impl Dependencies for AppDependencies {
+    type Clock = InstantClock;
+}
+
 fn main() -> Result<()> {
     dotenv::dotenv().ok();
-    app::run::<DragonsApp>("Dragons")
+    app::run::<DragonsApp<AppDependencies>>("Dragons")
 }
 
 #[repr(C)]
@@ -86,11 +100,7 @@ impl ResourceManager {
     }
 }
 
-pub struct RendererState {
-    pub active_camera: Entity,
-}
-
-pub struct DragonsApp {
+pub struct DragonsApp<TDeps: Dependencies> {
     world: World,
     resources: ResourceManager,
     depth_view: wgpu::TextureView,
@@ -101,9 +111,10 @@ pub struct DragonsApp {
     camera_entity: Entity,
     view_aspect_ratio: f32,
     mouse_move_delta: Vec2,
+    frame_counter: FrameCounter<TDeps::Clock>,
 }
 
-impl DragonsApp {
+impl<TDeps: Dependencies> DragonsApp<TDeps> {
     const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
 
     fn create_depth_texture(
@@ -250,7 +261,7 @@ impl DragonsApp {
     }
 }
 
-impl Example for DragonsApp {
+impl<TDeps: Dependencies> Example for DragonsApp<TDeps> {
     fn init(
         config: &wgpu::SurfaceConfiguration,
         _adapter: &wgpu::Adapter,
@@ -429,6 +440,7 @@ impl Example for DragonsApp {
         };
 
         let depth_view = Self::create_depth_texture(config, &device);
+        let frame_counter = Default::default();
 
         Ok(Self {
             world,
@@ -441,6 +453,7 @@ impl Example for DragonsApp {
             camera_entity,
             view_aspect_ratio: 1.0,
             mouse_move_delta: Default::default(),
+            frame_counter,
         })
     }
 
@@ -511,6 +524,7 @@ impl Example for DragonsApp {
         self.camera_movement_system();
         self.render_system(view, device, queue)?;
         self.mouse_move_post_render_system();
+        self.frame_counter.frame_done();
         Ok(())
     }
 }
