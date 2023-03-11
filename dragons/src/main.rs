@@ -25,8 +25,6 @@ use scene::Scene;
 use wgpu::util::DeviceExt;
 use winit::event::{ElementState, MouseButton, VirtualKeyCode};
 
-// TODO: calculate update delta time
-// TODO: mouse sensitivity
 // TODO: implement back face culling
 // TODO: correct objects positions in scene
 // TODO: implement texture loading
@@ -139,14 +137,22 @@ impl<TDeps: Dependencies> DragonsApp<TDeps> {
     }
 
     fn camera_movement_system(&mut self) {
+        const MOVEMENT_SPEED: f32 = 10.0;
+        const MOUSE_LOOK_SPEED: f32 = std::f32::consts::FRAC_PI_4;
+        let dt = self
+            .frame_counter
+            .avg_frame_duration()
+            .unwrap_or_default()
+            .as_millis() as f32
+            / 1000.0;
         let query = self
             .world
             .query_mut::<(&Camera, &mut Transform, &mut Player)>();
 
         for (_, (_, transform, player)) in query {
             if self.pressed_mouse_buttons.contains(&MouseButton::Left) {
-                player.yaw -= self.mouse_move_delta.x * 0.01;
-                player.pitch += self.mouse_move_delta.y * 0.01;
+                player.yaw -= self.mouse_move_delta.x * MOUSE_LOOK_SPEED * dt;
+                player.pitch += self.mouse_move_delta.y * MOUSE_LOOK_SPEED * dt;
                 player.pitch = player
                     .pitch
                     .clamp(-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2);
@@ -156,16 +162,16 @@ impl<TDeps: Dependencies> DragonsApp<TDeps> {
 
             let mut movement = Vec3::default();
             if self.pressed_keys.contains(&VirtualKeyCode::W) {
-                movement += forward * 0.1;
+                movement += forward * MOVEMENT_SPEED * dt;
             }
             if self.pressed_keys.contains(&VirtualKeyCode::S) {
-                movement -= forward * 0.1;
+                movement -= forward * MOVEMENT_SPEED * dt;
             }
             if self.pressed_keys.contains(&VirtualKeyCode::D) {
-                movement -= transform.left() * 0.1;
+                movement -= transform.left() * MOVEMENT_SPEED * dt;
             }
             if self.pressed_keys.contains(&VirtualKeyCode::A) {
-                movement += transform.left() * 0.1;
+                movement += transform.left() * MOVEMENT_SPEED * dt;
             }
             transform.position += movement;
             transform.rotation = Quat::from_euler(EulerRot::YXZ, player.yaw, player.pitch, 0.0);
