@@ -38,6 +38,8 @@ Scene (
     },
     instances: [(
         object: "suzanne",
+        offset: Some((0.2, 0.0, 0.0)),
+        scale: Some(0.25),
     ), (
         object: "plane",
         offset: Some((0.0, -0.35, -0.5)),
