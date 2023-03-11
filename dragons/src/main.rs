@@ -25,7 +25,7 @@ use scene::Scene;
 use wgpu::util::DeviceExt;
 use winit::event::{ElementState, MouseButton, VirtualKeyCode};
 
-// TODO: correct objects positions in scene
+// TODO: implement monkey head animation
 // TODO: implement texture loading
 // TODO: implement skybox
 // TODO: g-buffers and deferred rendering
