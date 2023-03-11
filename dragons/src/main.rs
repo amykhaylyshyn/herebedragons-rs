@@ -25,7 +25,6 @@ use scene::Scene;
 use wgpu::util::DeviceExt;
 use winit::event::{ElementState, MouseButton, VirtualKeyCode};
 
-// TODO: implement back face culling
 // TODO: correct objects positions in scene
 // TODO: implement texture loading
 // TODO: implement skybox
@@ -425,6 +424,7 @@ impl<TDeps: Dependencies> Example for DragonsApp<TDeps> {
             }),
             primitive: wgpu::PrimitiveState {
                 front_face: wgpu::FrontFace::Cw,
+                cull_mode: Some(wgpu::Face::Front),
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
