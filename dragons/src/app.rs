@@ -2,8 +2,6 @@ use anyhow::Result;
 use std::future::Future;
 #[cfg(target_arch = "wasm32")]
 use std::str::FromStr;
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::Instant;
 #[cfg(target_arch = "wasm32")]
 use web_sys::{ImageBitmapRenderingContext, OffscreenCanvas};
 use winit::{
@@ -16,13 +14,6 @@ pub fn cast_slice<T>(data: &[T]) -> &[u8] {
     use std::{mem::size_of, slice::from_raw_parts};
 
     unsafe { from_raw_parts(data.as_ptr() as *const u8, data.len() * size_of::<T>()) }
-}
-
-#[allow(dead_code)]
-pub enum ShaderStage {
-    Vertex,
-    Fragment,
-    Compute,
 }
 
 pub trait Example: 'static + Sized {
